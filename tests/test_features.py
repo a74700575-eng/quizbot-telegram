@@ -32,6 +32,7 @@ def test_leader_can_transfer_leadership_and_others_cannot(app):
     upd, q = cb_update("u:team", uid=11)  # العضو العادي ماعندوش زر تغيير القائد
     run(U.user_cb(upd, ctx))
     assert "u:lead" not in [b.callback_data for r in markup_of(q).inline_keyboard for b in r]
+    assert "u:newteam" in [b.callback_data for r in markup_of(q).inline_keyboard for b in r]
 
     upd, q = cb_update("u:team", uid=10)
     run(U.user_cb(upd, ctx))
@@ -156,12 +157,44 @@ def test_start_prompts_unassigned_member_for_code_then_shows_team(app):
     ctx = context(app)
     assert run(U.cmd_start(update, ctx)) == U.U_CODE
     assert "كود الفريق" in message.reply_text.await_args.args[0]
+    buttons = [b.callback_data for row in message.reply_text.await_args.kwargs["reply_markup"].inline_keyboard for b in row]
+    assert "u:newteam" in buttons
 
     team, _ = create_empty_team("الصقور")
     ctx.args = [f"join_{team['code']}"]
     assert run(U.cmd_start(update, ctx)) == ConversationHandler.END
     assert team_of(user.id)["id"] == team["id"]
     assert "الصقور" in message.reply_text.await_args.args[0]
+
+
+def test_unassigned_member_can_create_a_team_and_invite_members(app):
+    from telegram.ext import ConversationHandler
+
+    user = SimpleNamespace(id=83, first_name="منشئ", full_name="منشئ فريق", username="captain")
+    message = SimpleNamespace(reply_text=AsyncMock(), text="فريق الأبطال")
+    update = SimpleNamespace(effective_user=user, effective_message=message, message=message, callback_query=None)
+    ctx = context(app)
+    assert run(U.create_member_team_start(update, ctx)) == U.U_TEAM_NAME
+    assert "اسم الفريق" in message.reply_text.await_args.args[0]
+    assert run(U.create_member_team_name(update, ctx)) == ConversationHandler.END
+
+    team = team_of(user.id)
+    assert team["name"] == "فريق الأبطال" and team["leader_id"] == user.id
+    assert team["code"] in message.reply_text.await_args.args[0]
+    assert join_team(84, team["code"])[1] is None
+    assert team_of(84)["id"] == team["id"]
+
+
+def test_member_must_leave_current_team_before_creating_another(app):
+    from telegram.ext import ConversationHandler
+
+    team, _ = create_team(85, "فريق قائم")
+    user = SimpleNamespace(id=85, first_name="عضو", full_name="عضو قائم", username="member")
+    message = SimpleNamespace(reply_text=AsyncMock())
+    update = SimpleNamespace(effective_user=user, effective_message=message, message=message, callback_query=None)
+    assert run(U.create_member_team_start(update, context(app))) == ConversationHandler.END
+    assert "/leave" in message.reply_text.await_args.args[0]
+    assert team_of(85)["id"] == team["id"]
 
 
 def test_team_discussion_forwards_original_sender_identity(app):
@@ -176,13 +209,13 @@ def test_team_discussion_forwards_original_sender_identity(app):
     message.forward.assert_awaited_once_with(chat_id=31)
 
 
-def test_unassigned_user_relay_prompts_for_team_code_not_team_creation(app):
+def test_unassigned_user_relay_offers_join_or_create_team(app):
     user = SimpleNamespace(id=91, full_name="مستخدم بلا فريق", username=None)
     message = SimpleNamespace(reply_text=AsyncMock())
     update = SimpleNamespace(effective_user=user, effective_message=message)
     run(U.relay(update, SimpleNamespace(bot=app.bot)))
     text = message.reply_text.call_args.args[0]
-    assert "/start" in text and "كود الفريق" in text and "اعمل فريق" not in text
+    assert "/start" in text and "كود" in text and "/createteam" in text
 
 
 def test_top_command_runs_without_crashing_when_there_is_no_contest(app):

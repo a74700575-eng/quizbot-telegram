@@ -19,6 +19,7 @@ from .config import MAX_TEAM_SIZE, TIMEZONE
 from .db import get_setting
 from .engine import sync_membership
 from .teams import (
+    create_team,
     join_team,
     leave_team,
     notify_team,
@@ -31,6 +32,7 @@ from .teams import (
 from .ui import BLUE, GREEN, RED, btn, esc, is_admin, rows, show
 
 U_CODE = 101
+U_TEAM_NAME = 102
 
 
 def user_menu():
@@ -38,20 +40,21 @@ def user_menu():
         [btn("🔑 إدخال كود الفريق", "u:join", BLUE)],
         [btn("👥 فريقي", "u:team", BLUE), btn("🏆 الترتيب", "u:top", BLUE)],
         [btn("⭐ نجم الساحة اليوم", "u:arena", BLUE)],
+        [btn("➕ إنشاء فريق جديد", "u:newteam", GREEN)],
     )
 
 
 HELP = (
     "🎮 <b>بوت المسابقات</b>\n\n"
-    "• لو دي أول مرة، ابعت كود الفريق اللي الأدمن ادهولك\n"
+    "• انضم بكود فريق أو أنشئ فريقك من /createteam\n"
     "• /join CODE — الانضمام لفريق بالكود\n"
+    "• /createteam — إنشاء فريق جديد (تصبح قائده)\n"
     "• /team — بيانات فريقك وكود الدعوة\n"
     "• /leave — مغادرة الفريق\n"
     "• /top — ترتيب المسابقة الأخيرة\n"
     "• /arena — نجم الساحة وترتيب اليوم (أفضل 10 في كل صفحة)\n\n"
     f"الفريق حد أقصى {MAX_TEAM_SIZE} أعضاء. رسائلك هنا بتتوصل للفريق كرسائل مُعاد توجيهها باسم حسابك، حسب إعدادات خصوصيتك.\n"
-    "وقت السؤال كل عضو يختار إجابته، وإجابة الفريق النهائية هي <b>الأغلبية</b> "
-    "(ولو تعادلوا يرجّح صوت قائد الفريق 👑)."
+    "كل إجابة صحيحة تمنح صاحبها نقاطًا فردية، ويحصل الفريق على نقاط إضافية فقط إذا اختار كل أعضائه الإجابة الصحيحة."
 )
 
 
@@ -73,7 +76,9 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=user_menu(),
         )
         return ConversationHandler.END
-    await update.message.reply_text("أهلاً بك! 🔑 ابعت كود الفريق اللي الأدمن ادهولك عشان تنضم.")
+    await update.message.reply_text(
+        "أهلاً بك! 🔑 أدخل كود الفريق للانضمام، أو أنشئ فريقك بنفسك.", reply_markup=user_menu()
+    )
     return U_CODE
 
 
@@ -84,12 +89,16 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def send_team_view(update: Update, context: ContextTypes.DEFAULT_TYPE):
     t = team_of(update.effective_user.id)
     if not t:
-        await show(update, "لازم تدخل كود الفريق اللي الأدمن ادهولك عشان تنضم 👇", user_menu())
+        await show(update, "أنت غير منضم لفريق. أدخل كود دعوة أو أنشئ فريقًا جديدًا 👇", user_menu())
         return
     line1 = [btn("🏆 الترتيب", "u:top", BLUE), btn("⭐ نجم الساحة", "u:arena", BLUE)]
     if t["leader_id"] == update.effective_user.id and len(team_members(t["id"])) > 1:
         line1.insert(0, btn("👑 تغيير القائد", "u:lead", BLUE))
-    await show(update, team_text(t, context.bot.username), rows(line1, [btn("🚪 مغادرة الفريق", "u:leave", RED)]))
+    await show(
+        update,
+        team_text(t, context.bot.username),
+        rows(line1, [btn("➕ إنشاء فريق جديد", "u:newteam", GREEN)], [btn("🚪 مغادرة الفريق", "u:leave", RED)]),
+    )
 
 
 async def cmd_team(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -130,6 +139,37 @@ async def send_arena(update: Update, page=0):
 
 async def cmd_arena(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await send_arena(update)
+
+
+async def create_member_team_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """أي مستخدم غير مرتبط بفريق يستطيع إنشاء فريق ويصبح قائده."""
+    touch_user(update.effective_user)
+    if update.callback_query:
+        await update.callback_query.answer()
+    if team_of(update.effective_user.id):
+        await update.effective_message.reply_text(
+            "أنت بالفعل في فريق. اخرج منه أولًا بـ /leave ثم أنشئ فريقك.", reply_markup=user_menu()
+        )
+        return ConversationHandler.END
+    await update.effective_message.reply_text("اكتب اسم الفريق (من حرفين إلى 30 حرفًا). /cancel للإلغاء")
+    return U_TEAM_NAME
+
+
+async def create_member_team_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    touch_user(user)
+    team, error = create_team(user.id, update.message.text.strip())
+    if error:
+        await update.message.reply_text(error + "\nاكتب اسمًا آخر أو /cancel للإلغاء.")
+        return U_TEAM_NAME
+    await update.message.reply_text(
+        f"✅ أنشأت فريق <b>{esc(team['name'])}</b> وأصبحت قائده!\n"
+        "أرسل كود الدعوة أو الرابط لزملائك ليَنْضموا.\n\n"
+        + team_text(team, context.bot.username),
+        reply_markup=user_menu(),
+    )
+    await sync_membership(context.application, team["id"])
+    return ConversationHandler.END
 
 
 async def ask_leave(update: Update):
@@ -204,7 +244,10 @@ async def do_join(update: Update, context: ContextTypes.DEFAULT_TYPE, code):
     if err:
         await update.effective_message.reply_text(err)
         return False
-    await update.effective_message.reply_text(f"✅ اتضممت لفريق <b>{esc(t['name'])}</b>\n\n" + team_text(t, context.bot.username))
+    await update.effective_message.reply_text(
+        f"✅ اتضممت لفريق <b>{esc(t['name'])}</b>\n\n" + team_text(t, context.bot.username),
+        reply_markup=user_menu(),
+    )
     await notify_team(context.bot, t["id"], f"➕ <b>{esc(u.full_name)}</b> انضم للفريق.", exclude=u.id)
     await sync_membership(context.application, t["id"], new_uid=u.id)
     return True
@@ -220,7 +263,9 @@ async def join_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if team_of(update.effective_user.id):
         await update.effective_message.reply_text("انت بالفعل في فريق. اخرج منه الأول بـ /leave")
         return ConversationHandler.END
-    await update.effective_message.reply_text("ابعت كود الفريق (8 حروف/أرقام)\n/cancel للإلغاء")
+    await update.effective_message.reply_text(
+        "ابعت كود الفريق (8 حروف/أرقام)\n/cancel للإلغاء", reply_markup=user_menu()
+    )
     return U_CODE
 
 
@@ -237,7 +282,7 @@ async def relay(update: Update, context: ContextTypes.DEFAULT_TYPE):
     touch_user(u)
     t = team_of(u.id)
     if not t:
-        hint = "افتح لوحة التحكم بـ /admin" if is_admin(u.id) else "أرسل /start ثم أدخل كود الفريق الذي أعطاك الأدمن إياه."
+        hint = "افتح لوحة التحكم بـ /admin" if is_admin(u.id) else "أرسل /start ثم انضم بكود أو أنشئ فريقًا بـ /createteam."
         await msg.reply_text(hint, reply_markup=None if is_admin(u.id) else user_menu())
         return
     others = [m["id"] for m in team_members(t["id"]) if m["id"] != u.id]

@@ -86,7 +86,8 @@ async def post_init(app: Application):
         [
             BotCommand("start", "القائمة الرئيسية"), BotCommand("join", "الانضمام بكود"),
             BotCommand("team", "فريقي"), BotCommand("top", "ترتيب المسابقة"),
-            BotCommand("arena", "نجم الساحة وترتيب اليوم"), BotCommand("leave", "مغادرة الفريق"), BotCommand("help", "مساعدة"),
+            BotCommand("arena", "نجم الساحة وترتيب اليوم"), BotCommand("createteam", "إنشاء فريق جديد"),
+            BotCommand("leave", "مغادرة الفريق"), BotCommand("help", "مساعدة"),
         ]
     )
     for aid in ADMIN_IDS:
@@ -135,7 +136,7 @@ def build_app():
             CommandHandler("newteam", A.create_team_start),
             CommandHandler("addq", A.addq_start),
             CommandHandler("aiimport", A.ai_import_start),
-            CallbackQueryHandler(A.create_team_start, pattern=r"^(adm:teamadd|u:new)$"),
+            CallbackQueryHandler(A.create_team_start, pattern=r"^adm:teamadd$"),
             CallbackQueryHandler(A.addq_start, pattern=r"^adm:addq$"),
             CallbackQueryHandler(A.ai_import_start, pattern=r"^adm:aiimport$"),
             CallbackQueryHandler(A.import_start, pattern=r"^adm:import$"),
@@ -167,10 +168,19 @@ def build_app():
         entry_points=[
             CommandHandler("start", U.cmd_start),
             CommandHandler("join", U.join_start),
+            CommandHandler("createteam", U.create_member_team_start),
             CallbackQueryHandler(U.join_start, pattern=r"^u:join$"),
+            CallbackQueryHandler(U.create_member_team_start, pattern=r"^u:newteam$"),
         ],
-        states={U.U_CODE: [MessageHandler(TEXT, U.join_code)]},
-        fallbacks=cmd_fallbacks + [CallbackQueryHandler(leave_to_user, pattern=r"^u:(team|top|arena|menu|leave|leaveok|lead|setlead)")],
+        states={
+            U.U_CODE: [MessageHandler(TEXT, U.join_code)],
+            U.U_TEAM_NAME: [MessageHandler(TEXT, U.create_member_team_name)],
+        },
+        fallbacks=cmd_fallbacks + [
+            CommandHandler("createteam", U.create_member_team_start),
+            CallbackQueryHandler(U.create_member_team_start, pattern=r"^u:newteam$"),
+            CallbackQueryHandler(leave_to_user, pattern=r"^u:(team|top|arena|menu|leave|leaveok|lead|setlead)"),
+        ],
     )
     app.add_handler(admin_conv)
     app.add_handler(user_conv)
@@ -180,6 +190,7 @@ def build_app():
     app.add_handler(CommandHandler("team", U.cmd_team))
     app.add_handler(CommandHandler("top", U.cmd_top))
     app.add_handler(CommandHandler("arena", U.cmd_arena))
+    app.add_handler(CommandHandler("createteam", U.create_member_team_start))
     app.add_handler(CommandHandler("leave", U.cmd_leave))
     app.add_handler(CallbackQueryHandler(on_vote, pattern=r"^v:"))
     app.add_handler(CallbackQueryHandler(U.user_cb, pattern=r"^u:"))
