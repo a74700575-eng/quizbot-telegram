@@ -1,0 +1,5 @@
+python-telegram-bot[job-queue,rate-limiter]>=22.8,<23
+python-dotenv>=1.0
+openai>=1.75,<3
+google-genai>=1.0.0,<2
+tzdata

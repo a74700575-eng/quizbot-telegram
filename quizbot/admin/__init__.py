@@ -1,0 +1,62 @@
+"""لوحة تحكم الأدمن (مقسّمة: common · questions · contest · teams · settings · router)."""
+from .common import (  # noqa: F401
+    AI_INPUT,
+    AI_REVIEW,
+    BACK,
+    BCAST,
+    EDIT,
+    IMPORT,
+    PANEL,
+    Q_CORRECT,
+    Q_EXPL,
+    Q_IMAGE,
+    Q_OPTS,
+    Q_POINTS,
+    Q_TEXT,
+    Q_TIME,
+    S_VALUE,
+    TEAM_NAME,
+    admin_menu,
+    cmd_admin,
+)
+from .contest import (  # noqa: F401
+    export_results,
+    init_selection,
+    selection_cb,
+    show_admin_board,
+    show_selection,
+    show_status,
+)
+from .questions import (  # noqa: F401
+    addq_start,
+    ai_import_parse,
+    ai_import_review,
+    ai_import_start,
+    edit_start,
+    edit_value,
+    import_data,
+    import_start,
+    list_questions,
+    q_correct,
+    q_expl,
+    q_expl_skip,
+    q_image,
+    q_image_skip,
+    q_opts,
+    q_points,
+    q_points_skip,
+    q_text,
+    q_time,
+    q_time_skip,
+    question_cb,
+)
+from .router import admin_cb, leave_to_admin  # noqa: F401
+from .settings import NUM_SETTINGS, set_start, set_value, show_settings  # noqa: F401
+from .teams import (  # noqa: F401
+    bcast_send,
+    bcast_start,
+    create_team_name,
+    create_team_start,
+    list_teams,
+    team_cb,
+)
