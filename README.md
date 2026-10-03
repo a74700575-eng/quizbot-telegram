@@ -16,7 +16,7 @@ python bot.py
 
 ## النشر على Railway
 
-1. أنشئ Service من مستودع GitHub؛ Railway يكتشف `Dockerfile` ويستخدم أمر التشغيل `python bot.py`. اختَر خدمة مستمرة (Worker)، مش Cron؛ البوت لا يحتاج Public Domain أو Port لأنه يتصل بتليجرام عبر polling. راجع [دليل أوامر التشغيل](https://docs.railway.com/deployments/start-command) و[اختيار Worker](https://docs.railway.com/guides/cron-workers-queues).
+1. أنشئ Service من مستودع GitHub؛ Railway يكتشف `Dockerfile` الموجود في جذر المستودع ويستخدم أمر التشغيل `python bot.py`. اترك **Root Directory** فارغًا/على جذر المستودع؛ إذا استخدمت مسار Dockerfile مخصصًا فاضبط `RAILWAY_DOCKERFILE_PATH` وفق [توثيق Railway](https://docs.railway.com/builds/dockerfiles). اختَر خدمة مستمرة (Worker)، مش Cron؛ البوت لا يحتاج Public Domain أو Port لأنه يتصل بتليجرام عبر polling. راجع [دليل أوامر التشغيل](https://docs.railway.com/deployments/start-command) و[اختيار Worker](https://docs.railway.com/guides/cron-workers-queues).
 2. في تبويب **Variables** لخدمة البوت، اربط متغير PostgreSQL باستخدام اسم خدمة قاعدة البيانات كما يظهر في مشروعك. مثال إذا كان اسم الخدمة `Postgres`:
    ```text
    DATABASE_URL=${{Postgres.DATABASE_URL}}
