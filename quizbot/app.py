@@ -85,14 +85,16 @@ async def post_init(app: Application):
     await app.bot.set_my_commands(
         [
             BotCommand("start", "القائمة الرئيسية"), BotCommand("join", "الانضمام بكود"),
-            BotCommand("team", "فريقي"), BotCommand("top", "الترتيب"), BotCommand("leave", "مغادرة الفريق"), BotCommand("help", "مساعدة"),
+            BotCommand("team", "فريقي"), BotCommand("top", "ترتيب المسابقة"),
+            BotCommand("arena", "نجم الساحة وترتيب اليوم"), BotCommand("leave", "مغادرة الفريق"), BotCommand("help", "مساعدة"),
         ]
     )
     for aid in ADMIN_IDS:
         try:
             await app.bot.set_my_commands(
                 [BotCommand("admin", "لوحة الأدمن"), BotCommand("addq", "إضافة سؤال"), BotCommand("aiimport", "تنسيق كويز بالذكاء"), BotCommand("newteam", "إنشاء فريق"), BotCommand("start", "القائمة"),
-                 BotCommand("team", "فريقي"), BotCommand("top", "الترتيب")],
+                 BotCommand("team", "فريقي"), BotCommand("top", "ترتيب المسابقة"),
+                 BotCommand("arena", "نجم الساحة اليوم")],
                 scope=BotCommandScopeChat(aid),
             )
         except TelegramError:
@@ -125,6 +127,7 @@ def build_app():
         CommandHandler("help", cancel_then(U.cmd_help)),
         CommandHandler("team", cancel_then(U.cmd_team)),
         CommandHandler("top", cancel_then(U.cmd_top)),
+        CommandHandler("arena", cancel_then(U.cmd_arena)),
         CommandHandler("admin", cancel_then(A.cmd_admin)),
     ]
     admin_conv = ConversationHandler(
@@ -167,7 +170,7 @@ def build_app():
             CallbackQueryHandler(U.join_start, pattern=r"^u:join$"),
         ],
         states={U.U_CODE: [MessageHandler(TEXT, U.join_code)]},
-        fallbacks=cmd_fallbacks + [CallbackQueryHandler(leave_to_user, pattern=r"^u:(team|top|menu|leave|leaveok|lead|setlead)")],
+        fallbacks=cmd_fallbacks + [CallbackQueryHandler(leave_to_user, pattern=r"^u:(team|top|arena|menu|leave|leaveok|lead|setlead)")],
     )
     app.add_handler(admin_conv)
     app.add_handler(user_conv)
@@ -176,6 +179,7 @@ def build_app():
     app.add_handler(CommandHandler("admin", A.cmd_admin))
     app.add_handler(CommandHandler("team", U.cmd_team))
     app.add_handler(CommandHandler("top", U.cmd_top))
+    app.add_handler(CommandHandler("arena", U.cmd_arena))
     app.add_handler(CommandHandler("leave", U.cmd_leave))
     app.add_handler(CallbackQueryHandler(on_vote, pattern=r"^v:"))
     app.add_handler(CallbackQueryHandler(U.user_cb, pattern=r"^u:"))

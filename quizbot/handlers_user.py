@@ -1,12 +1,21 @@
 """أوامر وأزرار المستخدمين: الفرق، الترتيب، ونقاش الفريق."""
 import asyncio
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from telegram import Update
 from telegram.error import TelegramError
 from telegram.ext import ContextTypes, ConversationHandler
 
-from .board import board_rows, board_text, latest_contest
-from .config import MAX_TEAM_SIZE
+from .board import (
+    ARENA_PAGE_SIZE,
+    arena_rows,
+    arena_text,
+    board_rows,
+    board_text,
+    latest_contest,
+)
+from .config import MAX_TEAM_SIZE, TIMEZONE
 from .db import get_setting
 from .engine import sync_membership
 from .teams import (
@@ -28,6 +37,7 @@ def user_menu():
     return rows(
         [btn("🔑 إدخال كود الفريق", "u:join", BLUE)],
         [btn("👥 فريقي", "u:team", BLUE), btn("🏆 الترتيب", "u:top", BLUE)],
+        [btn("⭐ نجم الساحة اليوم", "u:arena", BLUE)],
     )
 
 
@@ -37,7 +47,8 @@ HELP = (
     "• /join CODE — الانضمام لفريق بالكود\n"
     "• /team — بيانات فريقك وكود الدعوة\n"
     "• /leave — مغادرة الفريق\n"
-    "• /top — ترتيب الفرق\n\n"
+    "• /top — ترتيب المسابقة الأخيرة\n"
+    "• /arena — نجم الساحة وترتيب اليوم (أفضل 10 في كل صفحة)\n\n"
     f"الفريق حد أقصى {MAX_TEAM_SIZE} أعضاء. رسائلك هنا بتتوصل للفريق كرسائل مُعاد توجيهها باسم حسابك، حسب إعدادات خصوصيتك.\n"
     "وقت السؤال كل عضو يختار إجابته، وإجابة الفريق النهائية هي <b>الأغلبية</b> "
     "(ولو تعادلوا يرجّح صوت قائد الفريق 👑)."
@@ -75,7 +86,7 @@ async def send_team_view(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not t:
         await show(update, "لازم تدخل كود الفريق اللي الأدمن ادهولك عشان تنضم 👇", user_menu())
         return
-    line1 = [btn("🏆 الترتيب", "u:top", BLUE)]
+    line1 = [btn("🏆 الترتيب", "u:top", BLUE), btn("⭐ نجم الساحة", "u:arena", BLUE)]
     if t["leader_id"] == update.effective_user.id and len(team_members(t["id"])) > 1:
         line1.insert(0, btn("👑 تغيير القائد", "u:lead", BLUE))
     await show(update, team_text(t, context.bot.username), rows(line1, [btn("🚪 مغادرة الفريق", "u:leave", RED)]))
@@ -103,6 +114,24 @@ async def cmd_top(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await send_top(update, context)
 
 
+async def send_arena(update: Update, page=0):
+    day = datetime.now(ZoneInfo(TIMEZONE)).date()
+    ranking = arena_rows(day)
+    last_page = max(0, (len(ranking) - 1) // ARENA_PAGE_SIZE)
+    page = max(0, min(page, last_page))
+    buttons = []
+    if page > 0:
+        buttons.append(btn("⬅️ السابق", f"u:arena:{page - 1}", BLUE))
+    if page < last_page:
+        buttons.append(btn("التالي ➡️", f"u:arena:{page + 1}", BLUE))
+    markup = rows(buttons) if buttons else None
+    await show(update, arena_text(ranking, day, page), markup)
+
+
+async def cmd_arena(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await send_arena(update)
+
+
 async def ask_leave(update: Update):
     if not team_of(update.effective_user.id):
         await show(update, "انت مش في فريق أصلاً.")
@@ -126,6 +155,12 @@ async def user_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await send_team_view(update, context)
     elif act == "top":
         await send_top(update, context)
+    elif act == "arena":
+        try:
+            page = int(q.data.split(":")[2]) if len(q.data.split(":")) > 2 else 0
+        except ValueError:
+            page = 0
+        await send_arena(update, page)
     elif act == "leave":
         await ask_leave(update)
     elif act in ("lead", "setlead"):

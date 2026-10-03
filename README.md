@@ -14,6 +14,10 @@ python bot.py
 
 > ⚠️ **قاعدة البيانات:** محليًا يستخدم البوت SQLite. على Railway يُفضّل ربط PostgreSQL عبر `DATABASE_URL`؛ أو استخدم SQLite مع Volume واجعل `DB_PATH` داخله (مثل `/data/quizbot.db`). شغّل **نسخة واحدة فقط** من البوت لأن حالة المسابقة الحية في الذاكرة.
 
+## نجم الساحة اليوم
+
+يستخدم اللاعبون الأمر `/arena` أو زر **⭐ نجم الساحة اليوم** لعرض ترتيب كل الفرق حسب نتائج المسابقات التي بدأت في اليوم الحالي حسب `TIMEZONE` (القاهرة افتراضيًا). نقاط الإجابات الصحيحة تشمل مكافأة السرعة، ثم تُستخدم الإجابات الصحيحة ومكافأة السرعة لكسر التعادل. يظهر النجم/النجوم في الأعلى، وتُعرض الفرق في صفحات من 10 فرق حتى يمكن تصفح القائمة كاملة. يتجدد الترتيب تلقائيًا مع بداية يوم جديد حسب `TIMEZONE`.
+
 ## النشر على Railway
 
 1. أنشئ Service من مستودع GitHub؛ Railway يكتشف `Dockerfile` الموجود في جذر المستودع ويستخدم أمر التشغيل `python bot.py`. اترك **Root Directory** فارغًا/على جذر المستودع؛ إذا استخدمت مسار Dockerfile مخصصًا فاضبط `RAILWAY_DOCKERFILE_PATH` وفق [توثيق Railway](https://docs.railway.com/builds/dockerfiles). اختَر خدمة مستمرة (Worker)، مش Cron؛ البوت لا يحتاج Public Domain أو Port لأنه يتصل بتليجرام عبر polling. راجع [دليل أوامر التشغيل](https://docs.railway.com/deployments/start-command) و[اختيار Worker](https://docs.railway.com/guides/cron-workers-queues).

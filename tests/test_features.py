@@ -217,3 +217,57 @@ def test_fmt_time_uses_cairo_timezone():
 def test_menu_has_history_button(app):
     data = [b.callback_data for r in A.admin_menu().inline_keyboard for b in r]
     assert "h:list" in data and asyncio.iscoroutinefunction(A.edit_value)
+
+
+def test_arena_ranks_today_by_points_correctness_and_speed_and_includes_all_teams(app):
+    from datetime import datetime, timedelta
+    from datetime import time as datetime_time
+    from zoneinfo import ZoneInfo
+
+    from quizbot.board import arena_ranked, arena_rows
+    from quizbot.config import TIMEZONE
+
+    tz = ZoneInfo(TIMEZONE)
+    today = datetime.now(tz).date()
+    today_start = datetime.combine(today, datetime_time.min, tzinfo=tz).timestamp()
+    yesterday_start = datetime.combine(today - timedelta(days=1), datetime_time.min, tzinfo=tz).timestamp()
+    fast, _ = create_empty_team("السريع")
+    slower, _ = create_empty_team("الأسرع غلط")
+    no_score, _ = create_empty_team("بلا نقاط")
+    db.x("INSERT INTO contests(id,status,started_at,qids,idx) VALUES(1,'finished',?,'[]',0)", (today_start + 3600,))
+    db.x("INSERT INTO contests(id,status,started_at,qids,idx) VALUES(2,'finished',?,'[]',0)", (today_start + 7200,))
+    db.x("INSERT INTO contests(id,status,started_at,qids,idx) VALUES(3,'finished',?,'[]',0)", (yesterday_start + 3600,))
+    db.x("INSERT INTO results(contest_id,qid,team_id,team_name,is_correct,points,bonus) VALUES(1,1,?,?,1,15,5)", (fast["id"], fast["name"]))
+    db.x("INSERT INTO results(contest_id,qid,team_id,team_name,is_correct,points,bonus) VALUES(2,2,?,?,1,12,2)", (fast["id"], fast["name"]))
+    db.x("INSERT INTO results(contest_id,qid,team_id,team_name,is_correct,points,bonus) VALUES(1,1,?,?,1,20,0)", (slower["id"], slower["name"]))
+    db.x("INSERT INTO results(contest_id,qid,team_id,team_name,is_correct,points,bonus) VALUES(3,3,?,?,1,999,999)", (no_score["id"], no_score["name"]))
+
+    ranked_rows = arena_ranked(arena_rows(today))
+    assert [row["id"] for _, row in ranked_rows] == [fast["id"], slower["id"], no_score["id"]]
+    assert ranked_rows[0][1]["pts"] == 27 and ranked_rows[0][1]["ok"] == 2 and ranked_rows[0][1]["bonus"] == 7
+    assert ranked_rows[1][1]["pts"] == 20
+    assert ranked_rows[2][1]["pts"] == 0
+
+
+def test_arena_shows_ten_per_page_and_allows_paging(app):
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from quizbot.board import ARENA_PAGE_SIZE, arena_rows, arena_text
+    from quizbot.config import TIMEZONE
+
+    for i in range(11):
+        create_empty_team(f"فريق الساحة {i:02d}")
+    today = datetime.now(ZoneInfo(TIMEZONE)).date()
+    ranking = arena_rows(today)
+    assert len(ranking) == 11
+    first_page = arena_text(ranking, today, 0)
+    second_page = arena_text(ranking, today, 1)
+    assert "إجمالي الفرق: 11" in first_page
+    assert len([line for line in first_page.splitlines() if "فريق الساحة" in line]) == ARENA_PAGE_SIZE
+    assert len([line for line in second_page.splitlines() if "فريق الساحة" in line]) == 1
+
+    upd, query = cb_update("u:arena:1", uid=100)
+    run(U.user_cb(upd, context(app)))
+    assert "الصفحة 2/2" in query.edit_message_text.call_args.args[0]
+    assert query.answer.await_count == 1
