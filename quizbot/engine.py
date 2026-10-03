@@ -5,7 +5,7 @@ import logging
 import math
 import random
 import time
-from collections import Counter, defaultdict
+from collections import defaultdict
 
 from telegram.error import BadRequest, TelegramError
 
@@ -13,7 +13,7 @@ from .board import board_rows, board_text
 from .config import LETTERS
 from .db import db, get_int, get_setting
 from .questions import get_question
-from .scoring import bar, majority, participation_ok, ranked, speed_bonus
+from .scoring import bar, majority, ranked, speed_bonus
 from .state import LOCK, RT
 from .teams import all_member_ids, team_members, team_of
 from .ui import BLUE, GREEN, RED, btn, clip, esc, notify_admins, rows, safe_send
@@ -62,38 +62,21 @@ def ctl_markup(c):
 
 # ───────────────────────────── عرض السؤال ─────────────────────────────
 def render_question(c, mem, vote_rows, leader_id=None):
-    votes = {r["user_id"]: r["choice"] for r in vote_rows}
-    header = f"❓ <b>سؤال {c['idx'] + 1}/{len(c['qids'])}</b>   🏅 {c['points']} نقطة"
-    if get_int("speed_bonus") > 0:
-        header += f" (+ مكافأة سرعة حتى {get_int('speed_bonus')}%)"
+    header = f"❓ <b>سؤال {c['idx'] + 1}/{len(c['qids'])}</b>"
     if c.get("paused"):
         timer = f"⏸ <b>المسابقة متوقفة مؤقتًا</b> — باقي {_left(c)} ثانية"
     else:
         timer = f"⏱ {bar(_left(c), c['tl'])} <b>{_left(c)}</b> ثانية"
-    lines = [header, timer, "", esc(c["qtext"]), ""]
-    lines += [f"<b>{LETTERS[i]})</b> {esc(o)}" for i, o in enumerate(c["opts"])]
-    lines += ["", f"🗳 <b>أصوات فريقك</b> ({len(votes)}/{len(mem)}):"]
-    for m in mem:
-        v = votes.get(m["id"])
-        crown = "👑 " if m["id"] == leader_id else ""
-        lines.append(f"• {crown}{esc(m['name'])} ← " + (f"<b>{LETTERS[v]}</b>" if v is not None else "…"))
-    if vote_rows:
-        lead_choice = votes.get(leader_id)
-        lead, _ = majority([(r["choice"], r["ts"]) for r in vote_rows], lead_choice)
-        lines.append(f"\n📊 الأغلبية حاليًا: <b>{LETTERS[lead]}</b>")
-    min_part = get_int("min_part")
-    if min_part:
-        lines.append(f"⚠️ لازم {min_part}% من الفريق على الأقل يصوّتوا عشان الإجابة تتحسب.")
-    lines.append("\n💬 اكتب أي رسالة هنا وهتوصل لزمايلك للنقاش. تقدر تغيّر اختيارك قبل انتهاء الوقت.")
-    return "\n".join(lines)
+    return f"{header}\n{timer}\n\n<b>{esc(c['qtext'])}</b>"
 
 
 def vote_markup(c, mine=None):
     btns = []
     for i in range(len(c["opts"])):
         picked = i == mine
-        btns.append(btn(("✅ " if picked else "") + LETTERS[i], f"v:{c['id']}:{c['qid']}:{i}", GREEN if picked else BLUE))
-    return rows(*[btns[i : i + 5] for i in range(0, len(btns), 5)])
+        label = f"{'✅ ' if picked else ''}{LETTERS[i]}) {c['opts'][i]}"
+        btns.append(btn(label[:64], f"v:{c['id']}:{c['qid']}:{i}", GREEN))
+    return rows(*[[choice] for choice in btns])
 
 
 def _team_view(c, tid):
@@ -104,23 +87,31 @@ def _team_view(c, tid):
     return mem, {r["user_id"]: r["choice"] for r in vote_rows}, text
 
 
-async def _edit(bot, uid, mid, text, markup):
-    try:
-        await bot.edit_message_text(text, chat_id=uid, message_id=mid, reply_markup=markup)
-    except BadRequest as e:
-        if "not modified" not in str(e).lower():
-            log.warning("edit failed: %s", e)
-    except TelegramError as e:
-        log.warning("edit failed: %s", e)
-
-
 async def refresh_team(app, c, tid):
     if not c.get("open"):
         return
     mem, votes, text = _team_view(c, tid)
     await _gather(
-        [_edit(app.bot, m["id"], c["msgs"][m["id"]], text, vote_markup(c, votes.get(m["id"]))) for m in mem if m["id"] in c["msgs"]]
+        [
+            _edit_question_message(
+                app.bot, m["id"], c["msgs"][m["id"]], text, vote_markup(c, votes.get(m["id"])), bool(c.get("image"))
+            )
+            for m in mem if m["id"] in c["msgs"]
+        ]
     )
+
+
+async def _edit_question_message(bot, uid, mid, text, markup, has_image=False):
+    try:
+        if has_image:
+            await bot.edit_message_caption(caption=text, chat_id=uid, message_id=mid, reply_markup=markup)
+        else:
+            await bot.edit_message_text(text, chat_id=uid, message_id=mid, reply_markup=markup)
+    except BadRequest as e:
+        if "not modified" not in str(e).lower():
+            log.warning("question edit failed: %s", e)
+    except TelegramError as e:
+        log.warning("question edit failed: %s", e)
 
 
 async def refresh_all(app, c):
@@ -161,7 +152,10 @@ async def sync_membership(app, tid, new_uid=None):
 async def _deliver(app, c, uid, text, markup):
     if c.get("image"):
         try:
-            await app.bot.send_photo(uid, c["image"], caption=f"🖼 سؤال {c['idx'] + 1}")
+            m = await app.bot.send_photo(uid, c["image"], caption=text, reply_markup=markup)
+            if m:
+                c["msgs"][uid] = m.message_id
+            return
         except TelegramError as e:
             log.warning("photo failed for %s: %s", uid, e)
     m = await safe_send(app.bot, uid, text, markup)
@@ -379,20 +373,48 @@ async def end_question(app, cid):
         qid, correct, pts, opts, tl = c["qid"], c["correct"], c["points"], c["opts"], c["tl"]
         q = get_question(qid)
         expl = q["explanation"] if q else ""
-        bonus_pct, min_pct = get_int("speed_bonus"), get_int("min_part")
+        bonus_pct = get_int("speed_bonus")
         per = defaultdict(list)
         for v in db.q("SELECT team_id, user_id, choice, ts FROM votes WHERE contest_id=? AND qid=?", (cid, qid)):
             per[v["team_id"]].append(v)
         outcomes = []
         for t in db.q("SELECT id, name, leader_id FROM teams WHERE EXISTS (SELECT 1 FROM members WHERE team_id=teams.id)"):
-            vs = per.get(t["id"], [])
-            n_mem = len(team_members(t["id"]))
-            leader = next((v["choice"] for v in vs if v["user_id"] == t["leader_id"]), None)
-            chosen, decided = majority([(v["choice"], v["ts"]) for v in vs], leader)
-            enough = participation_ok(len(vs), n_mem, min_pct)
-            ok = chosen is not None and enough and chosen == correct
+            members = team_members(t["id"])
+            member_ids = {m["id"] for m in members}
+            vs = [v for v in per.get(t["id"], []) if v["user_id"] in member_ids]
+            by_user = {v["user_id"]: v for v in vs}
+            chosen, _ = majority([(v["choice"], v["ts"]) for v in vs])
+            n_mem = len(members)
+            ok = n_mem > 0 and len(vs) == n_mem and all(v["choice"] == correct for v in vs)
             base = pts if ok else 0
-            bonus = speed_bonus(pts, bonus_pct, (decided or c["started"]) - c["started"], tl) if ok else 0
+            decided = max((v["ts"] for v in vs), default=c["started"]) if ok else c["started"]
+            bonus = speed_bonus(pts, bonus_pct, decided - c["started"], tl) if ok else 0
+            individual = {}
+            for member in members:
+                vote = by_user.get(member["id"])
+                player_ok = bool(vote and vote["choice"] == correct)
+                player_bonus = (
+                    speed_bonus(pts, bonus_pct, vote["ts"] - c["started"], tl) if player_ok else 0
+                )
+                player_points = (pts + player_bonus) if player_ok else 0
+                db.x(
+                    "INSERT INTO player_results(contest_id,qid,user_id,team_id,player_name,choice,is_correct,points,bonus) "
+                    "VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(contest_id,qid,user_id) DO UPDATE SET "
+                    "team_id=excluded.team_id,player_name=excluded.player_name,choice=excluded.choice,"
+                    "is_correct=excluded.is_correct,points=excluded.points,bonus=excluded.bonus",
+                    (cid, qid, member["id"], t["id"], member["name"], vote["choice"] if vote else None,
+                     int(player_ok), player_points, player_bonus),
+                )
+                lifetime = db.q(
+                    "SELECT SUM(points) total FROM player_results WHERE user_id=?", (member["id"],), one=True
+                )
+                individual[member["id"]] = {
+                    "choice": vote["choice"] if vote else None,
+                    "ok": player_ok,
+                    "pts": player_points,
+                    "bonus": player_bonus,
+                    "total": int(lifetime["total"] or 0),
+                }
             db.x(
                 "INSERT INTO results(contest_id,qid,team_id,team_name,q_text,chosen_text,correct_text,"
                 "is_correct,points,bonus,voters,members) VALUES(?,?,?,?,?,?,?,?,?,?,?,?) "
@@ -404,9 +426,9 @@ async def end_question(app, cid):
                  int(ok), base + bonus, bonus, len(vs), n_mem),
             )
             outcomes.append(
-                {"team": t, "chosen": chosen, "ok": ok, "enough": enough, "pts": base + bonus,
-                 "bonus": bonus, "voters": len(vs), "n": n_mem, "dist": Counter(v["choice"] for v in vs),
-                 "mine": {v["user_id"]: v["choice"] for v in vs}}
+                {"team": t, "chosen": chosen, "ok": ok, "pts": base + bonus,
+                 "bonus": bonus, "voters": len(vs), "n": n_mem,
+                 "individual": individual}
             )
         # Mark complete only after every team's result is durable; otherwise recovery can safely retry.
         db.x("UPDATE contests SET completed_idx=? WHERE id=?", (c["idx"], cid))
@@ -421,16 +443,10 @@ async def end_question(app, cid):
     for o in outcomes:
         t = o["team"]
         lines = ["⏰ <b>انتهى الوقت!</b>", f"✅ الإجابة الصحيحة: <b>{LETTERS[correct]}) {esc(opts[correct])}</b>"]
-        if o["chosen"] is None:
-            lines.append("🗳 فريقك ماصوّتش على السؤال ده.")
-        else:
-            verdict = "✅ صح!" if o["ok"] else "❌ غلط"
-            if not o["enough"]:
-                verdict = "⚠️ ماتحسبتش (المشاركة قليلة)"
-            lines.append(f"🗳 قرار فريقك بالأغلبية: <b>{LETTERS[o['chosen']]}) {esc(opts[o['chosen']])}</b> {verdict}")
-            lines.append("📊 توزيع الأصوات: " + " | ".join(f"{LETTERS[k]}: {v}" for k, v in sorted(o["dist"].items())))
-            if not o["enough"]:
-                lines.append(f"👥 صوّت {o['voters']} من {o['n']} — الحد الأدنى {get_int('min_part')}%.")
+        lines.append(
+            "🤝 كل أعضاء الفريق اختاروا الإجابة الصحيحة — نقاط الفريق محسوبة!"
+            if o["ok"] else f"🤝 لم يتفق كل أعضاء الفريق على الإجابة الصحيحة ({o['voters']}/{o['n']} صوّتوا)."
+        )
         gained = f"+{o['pts']}" if o["pts"] else "0"
         if o["bonus"]:
             gained += f" (منها {o['bonus']} مكافأة سرعة ⚡)"
@@ -439,12 +455,12 @@ async def end_question(app, cid):
             lines.append(f"\n📝 {esc(expl)}")
         base_text = "\n".join(lines)
         for m in team_members(t["id"]):
-            jobs.append(_close_for_member(app, m["id"], msgs.get(m["id"]), base_text, o["mine"].get(m["id"])))
+            jobs.append(_close_for_member(app, m["id"], msgs.get(m["id"]), base_text, o["individual"].get(m["id"])))
     await _gather(jobs)
 
     summary = [f"⏹ <b>انتهى السؤال {idx}/{total}</b>", ""]
     for o in outcomes:
-        ch = "لم يصوّتوا" if o["chosen"] is None else f"{LETTERS[o['chosen']]} {'✅' if o['ok'] else '❌'}"
+        ch = "إجماع صحيح ✅" if o["ok"] else f"لا إجماع ({o['voters']}/{o['n']} صوّتوا)"
         summary.append(f"• {esc(o['team']['name'])}: {ch} (+{o['pts']})")
     summary += ["", board_text(rows_, limit=5, title="🏆 <b>أعلى الفرق</b>")]
 
@@ -459,14 +475,24 @@ async def end_question(app, cid):
     await notify_admins(app.bot, "\n".join(summary), ctl_markup(c) if live else None)
 
 
-async def _close_for_member(app, uid, mid, text, my_choice):
+async def _close_for_member(app, uid, mid, text, my_result):
     if mid:
         try:
             await app.bot.edit_message_reply_markup(uid, mid, reply_markup=None)
         except TelegramError:
             pass
-    if my_choice is not None:
-        text += f"\n🙋 اختيارك أنت: <b>{LETTERS[my_choice]}</b>"
+    if my_result and my_result["choice"] is not None:
+        verdict = "صحيح" if my_result["ok"] else "غير صحيح"
+        text += (
+            f"\n🙋 إجابتك: <b>{LETTERS[my_result['choice']]}) {verdict}</b>"
+            f" · نقاطك الفردية: <b>+{my_result['pts']}</b>"
+            f" · إجمالي نقاطك: <b>{my_result['total']}</b>"
+        )
+        if my_result["bonus"]:
+            text += f" (منها +{my_result['bonus']} سرعة ⚡)"
+    else:
+        total = db.q("SELECT SUM(points) total FROM player_results WHERE user_id=?", (uid,), one=True)
+        text += f"\n🙋 لم تسجل إجابة · نقاطك الفردية: +0 · إجمالي نقاطك: {int(total['total'] or 0)}"
     await safe_send(app.bot, uid, text)
 
 

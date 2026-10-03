@@ -6,7 +6,7 @@ from conftest import run, vote_update
 
 from quizbot import engine
 from quizbot.board import board_rows
-from quizbot.db import db, set_setting
+from quizbot.db import db
 from quizbot.questions import insert_question
 from quizbot.state import RT
 from quizbot.teams import create_team, join_team
@@ -54,8 +54,10 @@ def test_full_contest_flow(app):
         # المؤقتات اتجدولت بعد الإرسال
         assert app.job_queue.live("_end_job") and app.job_queue.live("_warn_job") and app.job_queue.live("_tick_job")
 
-        # A: اتنين صح وواحد غلط → صح بالأغلبية · B: غلط · C: صوت واحد من 3 (33% < 50%)
-        for uid, ch in ((1, 1), (2, 1), (3, 0), (4, 0), (5, 1)):
+        # الفريق A إجماع صحيح · B إجابة فردية خاطئة · C عضو واحد صحيح لكن مفيش إجماع
+        assert "س1؟" in app.bot.photo_captions[0][1]
+        assert all(b.style == "success" for row in app.bot.photo_captions[0][2].inline_keyboard for b in row)
+        for uid, ch in ((1, 1), (2, 1), (3, 1), (4, 0), (5, 1)):
             _text, alert = await vote(app, uid, ch)
             assert not alert
         await engine.end_question(app, c["id"])
@@ -63,8 +65,10 @@ def test_full_contest_flow(app):
         res = {r["team_name"]: r for r in db.q("SELECT * FROM results WHERE qid=?", (q1,))}
         assert res["AA"]["is_correct"] == 1 and res["AA"]["points"] > 10 and res["AA"]["bonus"] > 0  # مكافأة سرعة
         assert res["BB"]["points"] == 0
-        assert res["CC"]["is_correct"] == 0 and res["CC"]["points"] == 0  # مشاركة قليلة
-        assert any("الحد الأدنى" in t for t in app.bot.texts_to(5))
+        assert res["CC"]["is_correct"] == 0 and res["CC"]["points"] == 0  # لا يوجد إجماع
+        player = db.q("SELECT points,is_correct FROM player_results WHERE user_id=5 AND qid=?", (q1,), one=True)
+        assert player["is_correct"] == 1 and player["points"] > 10  # نقاط فردية حتى بدون إجماع الفريق
+        assert any("لم يتفق كل أعضاء الفريق" in t for t in app.bot.texts_to(5))
         assert any("شرح 1" in t for t in app.bot.texts_to(1))
         # الجدولة اتعملت بعد إرسال النتايج
         nxt = app.job_queue.live("_next_job")
@@ -255,21 +259,23 @@ def test_enabling_manual_mode_cancels_pending_auto_advance(app):
     run(go())
 
 
-def test_leader_breaks_a_tie_in_a_two_member_team(app):
+def test_split_team_scores_individuals_but_not_team_consensus(app):
     for u in (20, 21):
         db.x("INSERT INTO users(id,name) VALUES(?,?)", (u, f"u{u}"))
     t, _ = create_team(20, "ثنائي")  # 20 هو القائد
     join_team(21, t["code"])
     q = insert_question("س؟", ["أ", "ب"], 1, tl=30)
-    set_setting("min_part", 0)
-
     async def go():
         await engine.start_contest(app, [q])
         c = RT["c"]
-        await vote(app, 21, 0)  # العضو صوّت الأول لغلط
-        await vote(app, 20, 1)  # القائد صوّت للصح
+        await vote(app, 21, 0)  # عضو أجاب خطأ
+        await vote(app, 20, 1)  # القائد أجاب صحيحًا، لكن لا يوجد إجماع
         await engine.end_question(app, c["id"])
-        assert db.q("SELECT is_correct FROM results", one=True)["is_correct"] == 1
+        team_result = db.q("SELECT is_correct,points FROM results", one=True)
+        assert team_result["is_correct"] == 0 and team_result["points"] == 0
+        players = {r["user_id"]: r for r in db.q("SELECT * FROM player_results")}
+        assert players[20]["is_correct"] == 1 and players[20]["points"] > 0
+        assert players[21]["is_correct"] == 0 and players[21]["points"] == 0
 
     run(go())
 

@@ -17,6 +17,7 @@ from ..questions import (
     import_questions,
     insert_question,
 )
+from ..state import RT
 from ..ui import BLUE, GREEN, RED, admin_only, btn, esc, rows, safe_send, show
 from .common import (
     AI_INPUT,
@@ -60,6 +61,9 @@ async def question_cb(update: Update, context: ContextTypes.DEFAULT_TYPE, p):
     q = get_question(qid)
     if not q:
         await list_questions(update, 0)
+        return
+    if act in ("edit", "del", "delok") and RT.get("c"):
+        await show(update, "⏳ لا يمكن تعديل أو حذف الأسئلة أثناء المسابقة. انتظر حتى تنتهي أو أوقفها أولًا.")
         return
     opts = json.loads(q["options"])
     if act == "view":

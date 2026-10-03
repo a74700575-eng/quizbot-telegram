@@ -271,3 +271,26 @@ def test_arena_shows_ten_per_page_and_allows_paging(app):
     run(U.user_cb(upd, context(app)))
     assert "الصفحة 2/2" in query.edit_message_text.call_args.args[0]
     assert query.answer.await_count == 1
+
+
+def test_question_cannot_be_edited_or_deleted_during_contest_but_can_after(app):
+    db.x("INSERT INTO users(id,name) VALUES(2,'عضو')")
+    create_team(2, "فريق المسابقة")
+    qid = insert_question("سؤال يُحذف بعد المسابقة", ["صح", "خطأ"], 0)
+
+    async def go():
+        await engine.start_contest(app, [qid])
+        upd, query = cb_update(f"q:del:{qid}:0")
+        await A.admin_cb(upd, context(app))
+        assert "لا يمكن تعديل أو حذف" in query.edit_message_text.call_args.args[0]
+        assert db.q("SELECT id FROM questions WHERE id=?", (qid,), one=True)
+
+        await engine.finish_contest(app, "stopped")
+        upd, query = cb_update(f"q:del:{qid}:0")
+        await A.admin_cb(upd, context(app))
+        assert "متأكد" in query.edit_message_text.call_args.args[0]
+        upd, _ = cb_update(f"q:delok:{qid}:0")
+        await A.admin_cb(upd, context(app))
+        assert db.q("SELECT id FROM questions WHERE id=?", (qid,), one=True) is None
+
+    run(go())

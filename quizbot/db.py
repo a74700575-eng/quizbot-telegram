@@ -27,6 +27,10 @@ CREATE TABLE IF NOT EXISTS results(
     chosen_text TEXT, correct_text TEXT, is_correct INTEGER, points INTEGER,
     bonus INTEGER DEFAULT 0, voters INTEGER DEFAULT 0, members INTEGER DEFAULT 0,
     PRIMARY KEY(contest_id, qid, team_id));
+CREATE TABLE IF NOT EXISTS player_results(
+    contest_id INTEGER, qid INTEGER, user_id INTEGER, team_id INTEGER, player_name TEXT,
+    choice INTEGER, is_correct INTEGER, points INTEGER DEFAULT 0, bonus INTEGER DEFAULT 0,
+    PRIMARY KEY(contest_id, qid, user_id));
 CREATE TABLE IF NOT EXISTS settings(k TEXT PRIMARY KEY, v TEXT);
 CREATE TABLE IF NOT EXISTS join_attempts(user_id INTEGER NOT NULL, attempted_at REAL NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_join_attempts_user_time ON join_attempts(user_id, attempted_at);
@@ -55,6 +59,10 @@ CREATE TABLE IF NOT EXISTS results(
     chosen_text TEXT, correct_text TEXT, is_correct INTEGER, points INTEGER,
     bonus INTEGER DEFAULT 0, voters INTEGER DEFAULT 0, members INTEGER DEFAULT 0,
     PRIMARY KEY(contest_id, qid, team_id));
+CREATE TABLE IF NOT EXISTS player_results(
+    contest_id BIGINT, qid BIGINT, user_id BIGINT, team_id BIGINT, player_name TEXT,
+    choice INTEGER, is_correct INTEGER, points INTEGER DEFAULT 0, bonus INTEGER DEFAULT 0,
+    PRIMARY KEY(contest_id, qid, user_id));
 CREATE TABLE IF NOT EXISTS settings(k TEXT PRIMARY KEY, v TEXT);
 CREATE TABLE IF NOT EXISTS join_attempts(user_id BIGINT NOT NULL, attempted_at DOUBLE PRECISION NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_join_attempts_user_time ON join_attempts(user_id, attempted_at);
@@ -76,7 +84,6 @@ DEFAULT_SETTINGS = {
     "points": "10",        # نقاط السؤال الافتراضية
     "gap": "5",            # الفاصل بين الأسئلة (ثانية)
     "show_lb": "1",        # عرض الترتيب للفرق
-    "min_part": "50",      # أقل نسبة مشاركة (%) عشان إجابة الفريق تتحسب
     "speed_bonus": "50",   # أقصى مكافأة سرعة (% من نقاط السؤال) — 0 يوقفها
     "tick": "10",          # تحديث العدّاد الحي كل كام ثانية — 0 يوقفه
     "manual": "0",         # وضع "السؤال التالي يدوي"

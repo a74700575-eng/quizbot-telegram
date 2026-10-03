@@ -5,7 +5,8 @@ from html.parser import HTMLParser
 
 from .db import db
 
-MAX_Q, MAX_OPT, MAX_EXPL = 300, 100, 200
+# Keep answer labels within Telegram's 64-character inline button limit (including the letter/check mark).
+MAX_Q, MAX_OPT, MAX_EXPL = 300, 59, 200
 
 
 def get_question(qid):

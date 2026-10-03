@@ -45,19 +45,24 @@ class FakeJobQueue:
 
 class FakeBot:
     def __init__(self):
-        self.sent, self.edits, self.photos, self.mid = [], [], [], 0
+        self.sent, self.edits, self.photos, self.photo_captions, self.mid = [], [], [], [], 0
 
     async def send_message(self, chat_id, text, reply_markup=None, **_):
         self.mid += 1
         self.sent.append((chat_id, text, reply_markup))
         return SimpleNamespace(message_id=self.mid)
 
-    async def send_photo(self, chat_id, photo, caption=None, **_):
+    async def send_photo(self, chat_id, photo, caption=None, reply_markup=None, **_):
+        self.mid += 1
         self.photos.append((chat_id, photo))
-        return SimpleNamespace(message_id=0)
+        self.photo_captions.append((chat_id, caption, reply_markup))
+        return SimpleNamespace(message_id=self.mid)
 
     async def edit_message_text(self, text, chat_id=None, message_id=None, reply_markup=None, **_):
         self.edits.append((chat_id, message_id, text, reply_markup))
+
+    async def edit_message_caption(self, caption=None, chat_id=None, message_id=None, reply_markup=None, **_):
+        self.edits.append((chat_id, message_id, caption, reply_markup))
 
     async def edit_message_reply_markup(self, chat_id, message_id, reply_markup=None, **_):
         pass
@@ -83,7 +88,7 @@ def vote_update(uid, cid, qid, choice):
 
 @pytest.fixture
 def app(monkeypatch):
-    for t in ("votes", "results", "contests", "members", "teams", "questions", "users", "settings", "join_attempts"):
+    for t in ("votes", "player_results", "results", "contests", "members", "teams", "questions", "users", "settings", "join_attempts"):
         db.x(f"DELETE FROM {t}")
     RT.clear()
     monkeypatch.setattr(engine, "LOCK", asyncio.Lock())
