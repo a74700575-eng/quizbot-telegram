@@ -12,7 +12,6 @@ NUM_SETTINGS = {
     "points": ("نقاط السؤال الافتراضية", 1, 1000, ""),
     "gap": ("الفاصل بين الأسئلة", 0, 120, "ث"),
     "speed_bonus": ("أقصى مكافأة سرعة كنسبة من نقاط السؤال (0 = بدون مكافأة)", 0, 200, "%"),
-    "tick": ("تحديث العدّاد الحي كل كام ثانية (0 = إيقاف، أو من 5 لـ 60)", 0, 60, "ث"),
 }
 
 
@@ -25,7 +24,6 @@ async def show_settings(update: Update):
         num("points", "🏅 نقاط السؤال", ""),
         num("gap", "⏳ الفاصل بين الأسئلة", " ث"),
         num("speed_bonus", "⚡ مكافأة السرعة", "%"),
-        num("tick", "⏲ تحديث العدّاد", " ث"),
         [btn(f"👁 عرض الترتيب: {on('show_lb')}", "tog:show_lb", BLUE)],
         [btn(f"🖐 التالي يدوي (افتراضي): {on('manual')}", "tog:manual", BLUE)],
         [btn("🔙 اللوحة", "adm:menu")],
@@ -50,9 +48,9 @@ async def set_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not key:
         return ConversationHandler.END
     _, lo, hi, _ = NUM_SETTINGS[key]
-    bad = not t.isdigit() or not lo <= int(t) <= hi or (key == "tick" and 0 < int(t) < 5)
+    bad = not t.isdigit() or not lo <= int(t) <= hi
     if bad:
-        await update.message.reply_text(f"اكتب رقم من {lo} لـ {hi}" + (" (أو 0 للإيقاف)" if key == "tick" else "") + ".")
+        await update.message.reply_text(f"اكتب رقم من {lo} لـ {hi}.")
         return S_VALUE
     set_setting(key, int(t))
     context.user_data.pop("setkey", None)

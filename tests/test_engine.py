@@ -52,10 +52,11 @@ def test_full_contest_flow(app):
         assert c["open"] and len(c["msgs"]) == 7
         assert len(app.bot.photos) == 7  # الصورة وصلت للكل
         # المؤقتات اتجدولت بعد الإرسال
-        assert app.job_queue.live("_end_job") and app.job_queue.live("_warn_job") and app.job_queue.live("_tick_job")
+        assert app.job_queue.live("_end_job")
+        assert not app.job_queue.live("_warn_job") and not app.job_queue.live("_tick_job")
 
         # الفريق A إجماع صحيح · B إجابة فردية خاطئة · C عضو واحد صحيح لكن مفيش إجماع
-        assert "س1؟" in app.bot.photo_captions[0][1]
+        assert app.bot.photo_captions[0][1] == "س1؟"
         assert all(b.style == "success" for row in app.bot.photo_captions[0][2].inline_keyboard for b in row)
         for uid, ch in ((1, 1), (2, 1), (3, 1), (4, 0), (5, 1)):
             _text, alert = await vote(app, uid, ch)
@@ -76,6 +77,7 @@ def test_full_contest_flow(app):
 
         await nxt[0].cb(ctx(app, nxt[0]))
         assert RT["c"]["qid"] == q2 and RT["c"]["open"]
+        assert app.bot.texts_to(4)[-1] == "س2؟"
         await vote(app, 4, 0)
         await engine.end_question(app, c["id"])  # آخر سؤال
         nxt = app.job_queue.live("_next_job")

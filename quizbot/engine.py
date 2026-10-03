@@ -13,7 +13,7 @@ from .board import board_rows, board_text
 from .config import LETTERS
 from .db import db, get_int, get_setting
 from .questions import get_question
-from .scoring import bar, majority, ranked, speed_bonus
+from .scoring import majority, ranked, speed_bonus
 from .state import LOCK, RT
 from .teams import all_member_ids, team_members, team_of
 from .ui import BLUE, GREEN, RED, btn, clip, esc, notify_admins, rows, safe_send
@@ -61,13 +61,9 @@ def ctl_markup(c):
 
 
 # ───────────────────────────── عرض السؤال ─────────────────────────────
-def render_question(c, mem, vote_rows, leader_id=None):
-    header = f"❓ <b>سؤال {c['idx'] + 1}/{len(c['qids'])}</b>"
-    if c.get("paused"):
-        timer = f"⏸ <b>المسابقة متوقفة مؤقتًا</b> — باقي {_left(c)} ثانية"
-    else:
-        timer = f"⏱ {bar(_left(c), c['tl'])} <b>{_left(c)}</b> ثانية"
-    return f"{header}\n{timer}\n\n<b>{esc(c['qtext'])}</b>"
+def render_question(c):
+    """Player-facing card contains only the prompt; choices are the inline buttons."""
+    return esc(c["qtext"])
 
 
 def vote_markup(c, mine=None):
@@ -82,8 +78,7 @@ def vote_markup(c, mine=None):
 def _team_view(c, tid):
     mem = team_members(tid)
     vote_rows = db.q("SELECT user_id, choice, ts FROM votes WHERE contest_id=? AND qid=? AND team_id=?", (c["id"], c["qid"], tid))
-    t = db.q("SELECT leader_id FROM teams WHERE id=?", (tid,), one=True)
-    text = clip(render_question(c, mem, vote_rows, t["leader_id"] if t else None))
+    text = clip(render_question(c))
     return mem, {r["user_id"]: r["choice"] for r in vote_rows}, text
 
 
@@ -276,36 +271,8 @@ async def open_question(app, c, q):
 
 
 def _schedule_timers(app, c, remaining):
-    _cancel(c, "job_end", "job_warn", "job_tick")
+    _cancel(c, "job_end")
     c["job_end"] = app.job_queue.run_once(_end_job, remaining, data=c["id"])
-    if remaining >= 20:
-        c["job_warn"] = app.job_queue.run_once(_warn_job, remaining - 10, data=c["id"])
-    tick = get_int("tick")
-    if tick:
-        tick = max(tick, 5)
-        if remaining > tick + 2:
-            c["job_tick"] = app.job_queue.run_repeating(_tick_job, interval=tick, first=tick, data=c["id"])
-
-
-async def _tick_job(context):
-    c = RT.get("c")
-    if not c or c["id"] != context.job.data or not c["open"] or c["paused"] or c.get("ticking"):
-        return
-    if _left(c) <= 3:
-        return
-    c["ticking"] = True
-    try:
-        await refresh_all(context.application, c)
-    finally:
-        c["ticking"] = False
-
-
-async def _warn_job(context):
-    c = RT.get("c")
-    if not c or c["id"] != context.job.data or not c["open"] or c["paused"]:
-        return
-    voted = {r["user_id"] for r in db.q("SELECT user_id FROM votes WHERE contest_id=? AND qid=?", (c["id"], c["qid"]))}
-    await _gather([safe_send(context.bot, uid, "⏰ باقي 10 ثواني! لسه ماصوّتش.") for uid in c["msgs"] if uid not in voted])
 
 
 async def _end_job(context):
@@ -369,7 +336,7 @@ async def end_question(app, cid):
         if not c or c["id"] != cid or not c["open"]:
             return
         c["open"] = False
-        _cancel(c, "job_end", "job_warn", "job_tick", "job_next")
+        _cancel(c, "job_end", "job_next")
         qid, correct, pts, opts, tl = c["qid"], c["correct"], c["points"], c["opts"], c["tl"]
         q = get_question(qid)
         expl = q["explanation"] if q else ""
@@ -505,7 +472,7 @@ async def pause_contest(app):
         c["paused"] = True
         if c["open"]:
             c["remaining"] = max(1, c["ends"] - time.time())
-            _cancel(c, "job_end", "job_warn", "job_tick")
+            _cancel(c, "job_end")
         _cancel(c, "job_next")
     await _announce(app, "⏸ <b>الأدمن أوقف المسابقة مؤقتًا.</b> استنوا إشعار الاستئناف.")
     if c["open"]:
@@ -549,7 +516,7 @@ async def finish_contest(app, status):
         c = RT.pop("c", None)
         if not c:
             return
-        _cancel(c, "job_end", "job_warn", "job_tick", "job_next")
+        _cancel(c, "job_end", "job_next")
         db.x("UPDATE contests SET status=?, ended_at=? WHERE id=?", (status, time.time(), c["id"]))
     if c.get("open"):
         await _gather([_strip_markup(app, uid, mid) for uid, mid in c["msgs"].items()])
