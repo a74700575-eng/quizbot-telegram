@@ -225,7 +225,8 @@ def test_admin_review_is_required_before_questions_are_inserted(app):
     update, query = cb_update("ai:confirm", uid=1)
     run(A.ai_import_review(update, ctx))
     assert db.q("SELECT COUNT(*) n FROM questions", one=True)["n"] == 1
-    saved = get_question(1)
+    question_id = db.q("SELECT id FROM questions WHERE text=?", (VALID["question"],), one=True)["id"]
+    saved = get_question(question_id)
     assert saved["text"] == VALID["question"] and saved["correct"] == 0
     assert "الأسئلة التي ظهرت بعلامة المراجعة" in query.edit_message_text.call_args.args[0]
     assert "ai_import_ready" not in ctx.user_data

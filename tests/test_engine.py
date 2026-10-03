@@ -17,7 +17,11 @@ def setup_teams():
     ids = {}
     for name, uids in (("AA", [1, 2, 3]), ("BB", [4]), ("CC", [5, 6, 7])):
         for u in uids:
-            db.x("INSERT OR REPLACE INTO users(id,name) VALUES(?,?)", (u, f"user{u}"))
+            db.x(
+                "INSERT INTO users(id,name) VALUES(?,?) "
+                "ON CONFLICT(id) DO UPDATE SET name=excluded.name",
+                (u, f"user{u}"),
+            )
         t, _ = create_team(uids[0], name)
         for u in uids[1:]:
             assert join_team(u, t["code"])[1] is None

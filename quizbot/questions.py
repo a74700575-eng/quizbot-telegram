@@ -16,6 +16,7 @@ def insert_question(text, opts, correct, expl="", tl=None, pts=None, image=None)
     return db.x(
         "INSERT INTO questions(text,options,correct,explanation,time_limit,points,created_at,image) VALUES(?,?,?,?,?,?,?,?)",
         (text, json.dumps(opts, ensure_ascii=False), correct, expl or "", tl, pts, time.time(), image or None),
+        return_id=True,
     )
 
 

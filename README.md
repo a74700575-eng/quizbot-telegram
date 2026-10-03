@@ -10,36 +10,40 @@ python -m venv venv && source venv/bin/activate      # على ويندوز: venv
 pip install -r requirements.txt
 python bot.py
 ```
-أو بـ Docker (الأفضل للاستضافة): `docker compose up -d --build` — قاعدة البيانات بتتحفظ في volume.
+أو بـ Docker (الأفضل للاستضافة): `docker compose up -d --build` — قاعدة SQLite المحلية بتتحفظ في volume.
 
-> ⚠️ **الاستضافة:** البيانات في ملف SQLite. على Railway/Render لازم تربط **Volume/Disk** وتحط `DB_PATH` جواه
-> (مثلاً `/data/quizbot.db`)، وإلا الفرق والأسئلة هتتمسح مع كل deploy.
-> والبوت بيشتغل بـ polling فمش محتاج دومين أو SSL. شغّل **نسخة واحدة بس** من البوت.
+> ⚠️ **قاعدة البيانات:** محليًا يستخدم البوت SQLite. على Railway يُفضّل ربط PostgreSQL عبر `DATABASE_URL`؛ أو استخدم SQLite مع Volume واجعل `DB_PATH` داخله (مثل `/data/quizbot.db`). شغّل **نسخة واحدة فقط** من البوت لأن حالة المسابقة الحية في الذاكرة.
 
 ## النشر على Railway
 
 1. أنشئ Service من مستودع GitHub؛ Railway يكتشف `Dockerfile` ويستخدم أمر التشغيل `python bot.py`. اختَر خدمة مستمرة (Worker)، مش Cron؛ البوت لا يحتاج Public Domain أو Port لأنه يتصل بتليجرام عبر polling. راجع [دليل أوامر التشغيل](https://docs.railway.com/deployments/start-command) و[اختيار Worker](https://docs.railway.com/guides/cron-workers-queues).
-2. أضف Volume للخدمة واجعل **Mount Path** هو `/data`، ثم اضبط `DB_PATH=/data/quizbot.db`. لا تضع قاعدة البيانات في مسار مؤقت أو في ملفات البناء؛ [Railway يركّب الـVolume عند تشغيل الخدمة](https://docs.railway.com/volumes).
-3. أضف المتغيرات التالية من تبويب **Variables** في Railway (لا تضفها إلى GitHub):
+2. في تبويب **Variables** لخدمة البوت، اربط متغير PostgreSQL باستخدام اسم خدمة قاعدة البيانات كما يظهر في مشروعك. مثال إذا كان اسم الخدمة `Postgres`:
+   ```text
+   DATABASE_URL=${{Postgres.DATABASE_URL}}
+   ```
+   Railway يدعم مراجع الخدمات بصيغة `${{SERVICE_NAME.VAR}}`؛ راجع [توثيق Variables](https://docs.railway.com/variables) و[توثيق PostgreSQL](https://docs.railway.com/databases/postgresql). غيّر `Postgres` إذا كان اسم خدمة قاعدة البيانات مختلفًا. البوت ينشئ الجداول والترقيات المطلوبة تلقائيًا عند بدء التشغيل.
+3. أضف بقية المتغيرات من تبويب **Variables** في Railway (لا تضع الأسرار في GitHub):
    ```text
    BOT_TOKEN=<توكن جديد من BotFather>
    ADMIN_IDS=<Telegram user ID للأدمن>
-   DB_PATH=/data/quizbot.db
    AI_PROVIDER=gemini
    AI_API_KEY=<Gemini API key>
    AI_MODEL=gemini-3.1-flash-lite
    TIMEZONE=Africa/Cairo
    ```
-4. ابدأ بنسخة واحدة فقط لأن قاعدة البيانات SQLite. احتفظ بنسخة احتياطية من الـVolume دوريًا، ولا تعمل Deploy أو Restart وقت تصويت مهم إن أمكن.
+   عند استخدام PostgreSQL لا تحتاج إلى `DB_PATH` أو Volume لقاعدة البيانات. ولو اخترت SQLite بدلًا منها، اربط Volume على `/data` واضبط `DB_PATH=/data/quizbot.db`؛ Railway يركّب الـVolume عند تشغيل الخدمة حسب [توثيقه](https://docs.railway.com/volumes).
+4. ابدأ بنسخة واحدة فقط لأن حالة المسابقة النشطة موجودة في ذاكرة العملية. خذ نسخًا احتياطية دورية من PostgreSQL، وتجنب Restart وقت التصويت إن أمكن.
 
-**استعادة المسابقة:** لو أعيد تشغيل الخدمة أثناء مسابقة، يحفظ البوت النتائج المكتملة ويرسل للأدمن خيار استكمال؛ السؤال الذي انقطع يُعاد من بدايته. تحديثات Telegram المعلّقة عند بدء التشغيل تُسقط حاليًا، لذلك قد تضيع أصوات/رسائل وصلت أثناء الانقطاع. إعداد Volume يحفظ قاعدة البيانات، لكنه لا يمنع انقطاع الخدمة أو فقد التحديثات المعلّقة.
+قاعدة PostgreSQL الجديدة تبدأ فارغة؛ لا ينقل البوت بيانات SQLite القديمة تلقائيًا. أعد إضافة الفرق والأسئلة، أو اطلب إعداد عملية ترحيل مستقلة إذا كانت لديك بيانات قائمة.
+
+**استعادة المسابقة:** لو أعيد تشغيل الخدمة أثناء مسابقة، يحفظ البوت النتائج المكتملة ويرسل للأدمن خيار استكمال؛ السؤال الذي انقطع يُعاد من بدايته. تحديثات Telegram المعلّقة عند بدء التشغيل تُسقط حاليًا، لذلك قد تضيع أصوات/رسائل وصلت أثناء الانقطاع. PostgreSQL يحفظ بيانات المسابقة المكتملة، لكنه لا يمنع انقطاع الخدمة أو فقد التحديثات المعلّقة.
 
 ## هيكل المشروع
 ```
 bot.py                  نقطة التشغيل
 quizbot/
   config.py             الإعدادات ومتغيرات البيئة
-  db.py                 SQLite + الإعدادات + ترقية القاعدة تلقائيًا
+  db.py                 SQLite محليًا أو PostgreSQL على الاستضافة + ترقية القاعدة
   state.py              حالة المسابقة الشغالة (في الذاكرة)
   scoring.py            حساب الأغلبية والمكافأة والترتيب (بدون تليجرام)
   teams.py              الفرق والأعضاء
@@ -99,11 +103,7 @@ tests/                  اختبارات (pytest)
 
 **HTML:** كل سؤال داخل عنصر `class="q"`:
 ```html
-<div class="q" data-answer="2" data-time="45" data-points="10" data-image="https://...">
-  <h3>عاصمة مصر؟</h3>
-  <ol><li>أسوان</li><li>القاهرة</li></ol>
-  <p class="exp">القاهرة هي العاصمة</p>
-</div>
+<div class="q" data-answer="2" data-time="45" data-points="10" data-image="https://..."><h3>عاصمة مصر؟</h3><ol><li>أسوان</li><li>القاهرة</li></ol><p class="exp">القاهرة هي العاصمة</p></div>
 ```
 الإجابة الصحيحة: `data-answer` (من 1) أو `class="correct"` على الـ `<li>`. الأسئلة المكررة بتتجاهل، والأخطاء بتتعرض برقم السؤال وسببها.
 

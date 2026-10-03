@@ -11,6 +11,7 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 TOKEN = os.getenv("BOT_TOKEN", "")
 ADMIN_IDS = {int(x) for x in os.getenv("ADMIN_IDS", "").replace(" ", "").split(",") if x.strip().isdigit()}
 DB_PATH = os.getenv("DB_PATH", "data/quizbot.db")
+DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 AI_API_KEY = os.getenv("AI_API_KEY", "").strip()
 AI_PROVIDER = os.getenv("AI_PROVIDER", "openai").strip().lower() or "openai"
 AI_API_BASE = os.getenv("AI_API_BASE", "").strip()

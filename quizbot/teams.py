@@ -62,9 +62,9 @@ def create_team(uid, name):
     name = " ".join(name.split())
     if not 2 <= len(name) <= 30:
         return None, "اسم الفريق لازم يكون من 2 لـ 30 حرف."
-    if db.q("SELECT 1 FROM teams WHERE name=?", (name,), one=True):
+    if db.q("SELECT 1 FROM teams WHERE lower(name)=lower(?)", (name,), one=True):
         return None, "الاسم ده مستخدم، اختار اسم تاني."
-    tid = db.x("INSERT INTO teams(name,code,leader_id,created_at) VALUES(?,?,?,?)", (name, gen_code(), uid, time.time()))
+    tid = db.x("INSERT INTO teams(name,code,leader_id,created_at) VALUES(?,?,?,?)", (name, gen_code(), uid, time.time()), return_id=True)
     db.x("INSERT INTO members(user_id,team_id,joined_at) VALUES(?,?,?)", (uid, tid, time.time()))
     return db.q("SELECT * FROM teams WHERE id=?", (tid,), one=True), None
 
@@ -74,11 +74,12 @@ def create_empty_team(name):
     name = " ".join(name.split())
     if not 2 <= len(name) <= 30:
         return None, "اسم الفريق لازم يكون من 2 لـ 30 حرف."
-    if db.q("SELECT 1 FROM teams WHERE name=?", (name,), one=True):
+    if db.q("SELECT 1 FROM teams WHERE lower(name)=lower(?)", (name,), one=True):
         return None, "الاسم ده مستخدم، اختار اسم تاني."
     tid = db.x(
         "INSERT INTO teams(name,code,leader_id,created_at) VALUES(?,?,NULL,?)",
         (name, gen_code(), time.time()),
+        return_id=True,
     )
     return db.q("SELECT * FROM teams WHERE id=?", (tid,), one=True), None
 

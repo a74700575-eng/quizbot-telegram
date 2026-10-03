@@ -189,6 +189,7 @@ async def start_contest(app, qids, shuffle_options=False, manual=False):
         cid = db.x(
             "INSERT INTO contests(status,started_at,qids,idx,flags) VALUES('running',?,?,-1,?)",
             (time.time(), json.dumps(qids), flags),
+            return_id=True,
         )
         RT["c"] = _new_runtime(cid, qids, manual=manual, shufo=shuffle_options)
     await _announce(app, f"🚀 <b>المسابقة بدأت!</b>\nعدد الأسئلة: {len(qids)}\nجهّزوا نفسكم، أول سؤال بعد ثواني…")
@@ -393,8 +394,12 @@ async def end_question(app, cid):
             base = pts if ok else 0
             bonus = speed_bonus(pts, bonus_pct, (decided or c["started"]) - c["started"], tl) if ok else 0
             db.x(
-                "INSERT OR REPLACE INTO results(contest_id,qid,team_id,team_name,q_text,chosen_text,correct_text,"
-                "is_correct,points,bonus,voters,members) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO results(contest_id,qid,team_id,team_name,q_text,chosen_text,correct_text,"
+                "is_correct,points,bonus,voters,members) VALUES(?,?,?,?,?,?,?,?,?,?,?,?) "
+                "ON CONFLICT(contest_id,qid,team_id) DO UPDATE SET team_name=excluded.team_name, "
+                "q_text=excluded.q_text, chosen_text=excluded.chosen_text, correct_text=excluded.correct_text, "
+                "is_correct=excluded.is_correct, points=excluded.points, bonus=excluded.bonus, "
+                "voters=excluded.voters, members=excluded.members",
                 (cid, qid, t["id"], t["name"], c["qtext"], opts[chosen] if chosen is not None else "", opts[correct],
                  int(ok), base + bonus, bonus, len(vs), n_mem),
             )
