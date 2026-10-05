@@ -12,6 +12,7 @@ from .contest import (
     export_results,
     history_cb,
     init_selection,
+    preview_cb,
     selection_cb,
     show_admin_board,
     show_selection,
@@ -25,9 +26,12 @@ from .teams import list_teams, team_cb
 @admin_only
 async def admin_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
-    await q.answer()
     p = q.data.split(":")
     k, app = p[0], context.application
+    if k == "pv":
+        await preview_cb(update, context, p)
+        return
+    await q.answer()
     if k == "adm":
         act = p[1]
         if act == "menu":

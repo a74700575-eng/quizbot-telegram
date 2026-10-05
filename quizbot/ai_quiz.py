@@ -154,6 +154,7 @@ def prepare_questions(parsed, raw=None):
             "options": clean["opts"] if clean else options,
             "correct_index": correct_index if answer_known and type(correct_index) is int else None,
             "explanation": clean["expl"] if clean else explanation.strip(),
+            "image": None,
         }
         if notes or clean is None:
             result["note"] = " · ".join(dict.fromkeys(notes)) or "تحتاج مراجعة قبل إضافتها."

@@ -20,8 +20,9 @@ from .common import (  # noqa: F401
     cmd_admin,
 )
 from .contest import (  # noqa: F401
-    export_results,
+    history_cb,
     init_selection,
+    preview_cb,
     selection_cb,
     show_admin_board,
     show_selection,
@@ -29,6 +30,7 @@ from .contest import (  # noqa: F401
 )
 from .questions import (  # noqa: F401
     addq_start,
+    ai_import_image,
     ai_import_parse,
     ai_import_review,
     ai_import_start,

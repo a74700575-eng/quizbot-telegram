@@ -5,15 +5,17 @@ import json
 import random
 
 from telegram import Update
+from telegram.error import TelegramError
 from telegram.ext import ContextTypes
 
 from .. import engine
 from ..board import board_rows, board_text, latest_contest
-from ..config import PER_PAGE
+from ..config import LETTERS, PER_PAGE
 from ..db import db, get_setting
+from ..questions import get_question
 from ..scoring import ranked
 from ..state import RT
-from ..ui import BLUE, GREEN, btn, fmt_time, rows, safe_send, show
+from ..ui import BLUE, GREEN, RED, btn, esc, fmt_time, rows, safe_send, show
 from .common import BACK
 
 
@@ -23,6 +25,130 @@ def init_selection(context):
         "shuf": False, "shufo": False, "manual": get_setting("manual") == "1",
     }
     return context.user_data["sel"]
+
+
+def _make_preview(s):
+    ids = sorted(s["ids"])
+    if s["shuf"]:
+        random.shuffle(ids)
+    items = []
+    for qid in ids:
+        question = get_question(qid)
+        if not question:
+            continue
+        options = json.loads(question["options"])
+        correct = question["correct"]
+        if s["shufo"]:
+            permutation = list(range(len(options)))
+            random.shuffle(permutation)
+            options = [options[i] for i in permutation]
+            correct = permutation.index(correct)
+        items.append(
+            {
+                "id": qid,
+                "text": question["text"],
+                "image": question["image"],
+                "options": options,
+                "correct": correct,
+            }
+        )
+    return {"items": items, "index": 0, "selected": None}
+
+
+def _preview_markup(item, index, total, selected=None):
+    choices = [
+        btn(
+            f"{'✅ ' if choice == selected else ''}{LETTERS[choice]}) {option}"[:64],
+            f"pv:a:{item['id']}:{choice}",
+            GREEN,
+        )
+        for choice, option in enumerate(item["options"])
+    ]
+    navigation = []
+    if index > 0:
+        navigation.append(btn("⬅️ السابق", f"pv:prev:{index}", BLUE))
+    if index + 1 < total:
+        navigation.append(btn("التالي ➡️", f"pv:next:{index}", BLUE))
+    navigation.append(btn("✅ إنهاء المعاينة", f"pv:close:{index}", RED))
+    return rows(*[[choice] for choice in choices], navigation)
+
+
+async def _send_preview_question(bot, chat_id, preview):
+    item = preview["items"][preview["index"]]
+    text = esc(item["text"])
+    markup = _preview_markup(item, preview["index"], len(preview["items"]), preview.get("selected"))
+    if item["image"]:
+        try:
+            await bot.send_photo(chat_id, item["image"], caption=text, reply_markup=markup)
+            return
+        except TelegramError:
+            pass
+    await safe_send(bot, chat_id, text, markup)
+
+
+async def _disable_preview_controls(query):
+    try:
+        await query.edit_message_reply_markup(reply_markup=None)
+    except TelegramError:
+        pass
+
+
+async def preview_cb(update: Update, context: ContextTypes.DEFAULT_TYPE, p):
+    query = update.callback_query
+    preview = context.user_data.get("quiz_preview")
+    if not preview:
+        await query.answer("انتهت المعاينة. ارجع لاختيار الأسئلة وابدأ واحدة جديدة.", show_alert=True)
+        return
+
+    action = p[1]
+    index = preview["index"]
+    item = preview["items"][index]
+    if action == "a":
+        try:
+            qid, choice = int(p[2]), int(p[3])
+        except (IndexError, ValueError):
+            await query.answer("اختيار غير صالح.", show_alert=True)
+            return
+        if qid != item["id"] or not 0 <= choice < len(item["options"]):
+            await query.answer("هذا الزر من سؤال سابق في المعاينة.", show_alert=True)
+            return
+        preview["selected"] = choice
+        if choice == item["correct"]:
+            answer_text = "✅ إجابة صحيحة — معاينة فقط، بدون نقاط أو مسابقة."
+        else:
+            answer_text = f"❌ إجابة غير صحيحة — الصحيح {LETTERS[item['correct']]}) {item['options'][item['correct']]} (معاينة فقط)."
+        await query.answer(answer_text, show_alert=True)
+        try:
+            await query.edit_message_reply_markup(
+                reply_markup=_preview_markup(item, index, len(preview["items"]), choice)
+            )
+        except TelegramError:
+            pass
+        return
+
+    try:
+        expected_index = int(p[2])
+    except (IndexError, ValueError):
+        await query.answer("زر معاينة غير صالح.", show_alert=True)
+        return
+    if expected_index != index:
+        await query.answer("هذه بطاقة قديمة؛ استخدم أزرار آخر سؤال.", show_alert=True)
+        return
+    await query.answer()
+    if action == "close":
+        await _disable_preview_controls(query)
+        context.user_data.pop("quiz_preview", None)
+        await show_selection(update, context)
+        return
+    if action not in ("prev", "next"):
+        return
+    new_index = index - 1 if action == "prev" else index + 1
+    if not 0 <= new_index < len(preview["items"]):
+        return
+    await _disable_preview_controls(query)
+    preview["index"] = new_index
+    preview["selected"] = None
+    await _send_preview_question(context.bot, query.message.chat_id, preview)
 
 
 async def show_selection(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -78,8 +204,27 @@ async def selection_cb(update: Update, context: ContextTypes.DEFAULT_TYPE, p):
             update,
             f"جاهز تبدأ؟\n\n📋 الأسئلة: {len(s['ids'])}\n👥 الفرق: {teams} · الأعضاء: {mem}\n⏱ الوقت الافتراضي: {get_setting('time')} ث"
             + (f"\n⚙️ {' · '.join(opts)}" if opts else ""),
-            rows([btn("✅ ابدأ الآن", "sel:launch", GREEN)], [btn("🔙 تعديل الأسئلة", "sel:p:0")]),
+            rows(
+                [btn("✅ ابدأ الآن", "sel:launch", GREEN)],
+                [btn("🎮 تجربة الأسئلة قبل البدء", "sel:preview", BLUE)],
+                [btn("🔙 تعديل الأسئلة", "sel:p:0")],
+            ),
         )
+        return
+    elif act == "preview":
+        if not s["ids"]:
+            await update.callback_query.answer("اختار سؤالًا واحدًا على الأقل للمعاينة.", show_alert=True)
+            return
+        preview = _make_preview(s)
+        if not preview["items"]:
+            await update.callback_query.answer("الأسئلة المختارة لم تعد موجودة.", show_alert=True)
+            return
+        context.user_data["quiz_preview"] = preview
+        await update.callback_query.edit_message_text(
+            "🎮 <b>معاينة خاصة للأدمن</b> — الاختيارات لا تبدأ المسابقة ولا تُحتسب نقاطًا.",
+            reply_markup=None,
+        )
+        await _send_preview_question(context.bot, update.effective_chat.id, preview)
         return
     elif act == "launch":
         ids = sorted(s["ids"])

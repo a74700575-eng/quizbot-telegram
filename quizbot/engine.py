@@ -7,6 +7,7 @@ import random
 import time
 from collections import defaultdict
 
+from apscheduler.jobstores.base import JobLookupError
 from telegram.error import BadRequest, TelegramError
 
 from .board import board_rows, board_text
@@ -26,7 +27,11 @@ def _cancel(c, *names):
     for n in names:
         job = c.pop(n, None)
         if job:
-            job.schedule_removal()
+            try:
+                job.schedule_removal()
+            except JobLookupError:
+                # A run_once job is removed by APScheduler before its callback runs.
+                log.debug("scheduled job %s was already removed", n)
 
 
 async def _gather(coros):

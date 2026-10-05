@@ -16,7 +16,8 @@ from quizbot.teams import create_team
 def cb_update(data, uid=1):
     q = SimpleNamespace(
         data=data, from_user=SimpleNamespace(id=uid, full_name="x", username=None, first_name="x"), answer=AsyncMock(),
-        edit_message_text=AsyncMock(), message=SimpleNamespace(reply_text=AsyncMock(), chat_id=uid),
+        edit_message_text=AsyncMock(), edit_message_reply_markup=AsyncMock(),
+        message=SimpleNamespace(reply_text=AsyncMock(), chat_id=uid),
     )
     msg = SimpleNamespace(reply_text=AsyncMock(), chat_id=uid)
     return SimpleNamespace(

@@ -217,6 +217,7 @@ def test_admin_review_is_required_before_questions_are_inserted(app):
             "options": VALID["options"],
             "correct_index": 0,
             "explanation": VALID["explanation"],
+            "image": "telegram-photo-file-id",
         }
     ]
     ctx.user_data["ai_import_flagged"] = [{"question": "لا تضف هذا", "note": "إجابته غير واضحة"}]
@@ -228,8 +229,30 @@ def test_admin_review_is_required_before_questions_are_inserted(app):
     question_id = db.q("SELECT id FROM questions WHERE text=?", (VALID["question"],), one=True)["id"]
     saved = get_question(question_id)
     assert saved["text"] == VALID["question"] and saved["correct"] == 0
+    assert saved["image"] == "telegram-photo-file-id"
     assert "الأسئلة التي ظهرت بعلامة المراجعة" in query.edit_message_text.call_args.args[0]
     assert "ai_import_ready" not in ctx.user_data
+
+
+def test_ai_import_photo_is_mapped_by_preview_question_number(app):
+    ctx = context(app)
+    ctx.user_data["ai_import_ready"] = [{
+        "source_number": 2,
+        "question": "ما عاصمة مصر؟",
+        "options": ["القاهرة", "الإسكندرية"],
+        "correct_index": 0,
+        "explanation": "",
+        "image": None,
+    }]
+    photo = SimpleNamespace(file_id="small-photo"), SimpleNamespace(file_id="largest-photo")
+    message = SimpleNamespace(photo=photo, caption="2", reply_text=AsyncMock())
+    update = SimpleNamespace(
+        effective_user=SimpleNamespace(id=1, full_name="Admin"), effective_message=message, message=message
+    )
+
+    assert run(A.ai_import_image(update, ctx)) == A.AI_REVIEW
+    assert ctx.user_data["ai_import_ready"][0]["image"] == "largest-photo"
+    assert "السؤال 2" in message.reply_text.await_args.args[0]
 
 
 def test_ai_import_command_is_admin_only_and_explains_external_processing(app, monkeypatch):

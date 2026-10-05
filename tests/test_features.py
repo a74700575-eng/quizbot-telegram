@@ -148,6 +148,47 @@ def test_application_processes_updates_sequentially_for_conversations():
     assert built.update_processor.max_concurrent_updates == 1
 
 
+def test_admin_can_preview_contest_questions_without_starting_a_real_contest(app):
+    q1 = insert_question("أين يقع النيل؟", ["مصر", "اليابان"], 0, image="https://example.test/nile.png")
+    q2 = insert_question("كم يساوي 2+2؟", ["3", "4"], 1)
+    ctx = context(app)
+    A.init_selection(ctx)
+    ctx.user_data["sel"]["ids"] = {q1, q2}
+
+    update, query = cb_update("sel:go", uid=1)
+    run(A.admin_cb(update, ctx))
+    controls = [b.callback_data for row in markup_of(query).inline_keyboard for b in row]
+    assert "sel:preview" in controls
+
+    update, query = cb_update("sel:preview", uid=1)
+    run(A.admin_cb(update, ctx))
+    ctx.bot.send_photo.assert_awaited_once()
+    photo_call = ctx.bot.send_photo.await_args.kwargs
+    assert photo_call["caption"] == "أين يقع النيل؟"
+    buttons = [b for row in photo_call["reply_markup"].inline_keyboard for b in row]
+    assert all(b.style == "success" for b in buttons if b.callback_data.startswith("pv:a:"))
+    assert "pv:next:0" in [b.callback_data for b in buttons]
+
+    update, query = cb_update(f"pv:a:{q1}:0", uid=1)
+    run(A.admin_cb(update, ctx))
+    query.answer.assert_awaited_with("✅ إجابة صحيحة — معاينة فقط، بدون نقاط أو مسابقة.", show_alert=True)
+    assert db.q("SELECT COUNT(*) n FROM contests", one=True)["n"] == 0
+    assert db.q("SELECT COUNT(*) n FROM votes", one=True)["n"] == 0
+
+    update, query = cb_update("pv:next:0", uid=1)
+    run(A.admin_cb(update, ctx))
+    assert app.bot.texts_to(1)[-1] == "كم يساوي 2+2؟"
+
+    update, query = cb_update("pv:close:1", uid=1)
+    run(A.admin_cb(update, ctx))
+    assert "quiz_preview" not in ctx.user_data
+    assert any(
+        b.callback_data == "sel:go"
+        for row in query.edit_message_text.call_args.kwargs["reply_markup"].inline_keyboard
+        for b in row
+    )
+
+
 def test_start_prompts_unassigned_member_for_code_then_shows_team(app):
     from telegram.ext import ConversationHandler
 

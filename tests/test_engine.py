@@ -2,6 +2,7 @@ import asyncio
 import time
 from types import SimpleNamespace
 
+from apscheduler.jobstores.base import JobLookupError
 from conftest import run, vote_update
 
 from quizbot import engine
@@ -38,6 +39,45 @@ async def vote(app, uid, choice):
 
 def ctx(app, job):
     return SimpleNamespace(application=app, bot=app.bot, job=job)
+
+
+def test_end_callback_tolerates_its_one_shot_job_already_being_removed(app):
+    setup_teams()
+    qid = insert_question("سؤال؟", ["أ", "ب"], 0, tl=30)
+
+    class CompletedJob:
+        def schedule_removal(self):
+            raise JobLookupError("No job by the id was found")
+
+    async def go():
+        await engine.start_contest(app, [qid])
+        c = RT["c"]
+        c["job_end"] = CompletedJob()
+        await engine._end_job(ctx(app, SimpleNamespace(data=c["id"])))
+        assert not RT["c"]["open"]
+        assert db.q("SELECT COUNT(*) n FROM results", one=True)["n"] == 3
+
+    run(go())
+
+
+def test_automatic_next_question_survives_completed_scheduler_job(app):
+    setup_teams()
+    q1 = insert_question("سؤال أول؟", ["أ", "ب"], 0, tl=30)
+    q2 = insert_question("سؤال تاني؟", ["أ", "ب"], 1, tl=30)
+
+    class CompletedJob:
+        def schedule_removal(self):
+            raise JobLookupError("No job by the id was found")
+
+    async def go():
+        await engine.start_contest(app, [q1, q2])
+        c = RT["c"]
+        await engine.end_question(app, c["id"])
+        c["job_next"] = CompletedJob()
+        await engine._next_job(ctx(app, SimpleNamespace(data=c["id"])))
+        assert RT["c"]["qid"] == q2 and RT["c"]["open"]
+
+    run(go())
 
 
 def test_full_contest_flow(app):

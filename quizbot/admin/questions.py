@@ -282,7 +282,7 @@ async def ai_import_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.effective_message.reply_text(
         "✨ <b>تنسيق أسئلة بالذكاء الاصطناعي</b>\n\n"
         f"الصق الأسئلة مع الاختيارات والإجابات الصحيحة، أو أرسل ملف <b>.txt</b> (حتى {MAX_AI_QUESTIONS} سؤالًا و20,000 حرف).\n"
-        "سيحوّلها إلى كويز ويعرض معاينة؛ <b>لن تُضاف أي أسئلة قبل تأكيدك</b>. الإجابة غير الواضحة لن يتم تخمينها، وستظهر للمراجعة ولن تُضاف.\n\n"
+        "سيحوّلها إلى كويز ويعرض معاينة؛ <b>لن تُضاف أي أسئلة قبل تأكيدك</b>. بعد المعاينة يمكنك إرفاق صورة لكل سؤال بإرسال الصورة مع رقم السؤال في التعليق. الإجابة غير الواضحة لن يتم تخمينها، وستظهر للمراجعة ولن تُضاف.\n\n"
         "تنبيه: النص المرسل سيُرسل إلى مزود الذكاء الاصطناعي لإتمام التنسيق. راجع الإجابات بنفسك قبل التأكيد.\n"
         "/cancel للإلغاء"
     )
@@ -304,11 +304,16 @@ def _ai_preview_chunks(ready, flagged):
         for i, option in enumerate(item["options"]):
             marker = "✅" if item["correct_index"] == i else "▫️"
             lines.append(f"{marker} {esc(option)}")
+        if item.get("image"):
+            lines.append("🖼 صورة مرفقة")
         if needs_review and item.get("note"):
             lines.append(f"ملاحظة: {esc(item['note'])}")
         blocks.append("\n".join(lines))
 
-    header = f"📋 <b>المعاينة:</b> {len(ready)} سؤال جاهز، {len(flagged)} يحتاج مراجعة.\n\n"
+    header = f"📋 <b>المعاينة:</b> {len(ready)} سؤال جاهز، {len(flagged)} يحتاج مراجعة.\n"
+    if ready:
+        header += "🖼 لإرفاق صورة: أرسلها كصورة مع رقم السؤال الظاهر في المعاينة في التعليق (مثال: 2).\n"
+    header += "\n"
     chunks, current = [], header
     for block in blocks:
         units = len((current + block + "\n\n").encode("utf-16-le")) // 2
@@ -372,6 +377,32 @@ async def ai_import_parse(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 @admin_only
+async def ai_import_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    message = update.effective_message
+    ready = context.user_data.get("ai_import_ready")
+    if not ready:
+        await message.reply_text("لا توجد معاينة أسئلة مفتوحة. ابدأ من /aiimport أولًا.")
+        return AI_REVIEW
+    caption = (message.caption or "").strip()
+    if not caption.isdecimal():
+        await message.reply_text("اكتب رقم السؤال الظاهر في المعاينة في تعليق الصورة (مثال: 2).")
+        return AI_REVIEW
+    source_number = int(caption)
+    item = next((question for question in ready if question["source_number"] == source_number), None)
+    if not item:
+        await message.reply_text("هذا الرقم لا يطابق سؤالًا جاهزًا للإضافة. استخدم رقم سؤال عليه علامة ✅ في المعاينة.")
+        return AI_REVIEW
+    if not message.photo:
+        await message.reply_text("أرسل الصورة كصورة Telegram، مع رقم السؤال في التعليق.")
+        return AI_REVIEW
+    item["image"] = message.photo[-1].file_id
+    await message.reply_text(
+        f"✅ تم ربط الصورة بالسؤال {source_number}. أرسل صورًا أخرى بالطريقة نفسها أو اضغط تأكيد الإضافة."
+    )
+    return AI_REVIEW
+
+
+@admin_only
 async def ai_import_review(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     action = query.data.split(":", 1)[1]
@@ -392,6 +423,7 @@ async def ai_import_review(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "options": item["options"],
             "answer": item["correct_index"] + 1,
             "explanation": item["explanation"],
+            "image": item.get("image"),
         }
         for item in ready
     ]

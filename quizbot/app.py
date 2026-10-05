@@ -51,14 +51,14 @@ async def on_error(update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    for k in ("nq", "setkey", "edit", "ai_import_ready", "ai_import_flagged"):
+    for k in ("nq", "setkey", "edit", "ai_import_ready", "ai_import_flagged", "quiz_preview"):
         context.user_data.pop(k, None)
     await update.effective_message.reply_text("تم الإلغاء ✅")
     return ConversationHandler.END
 
 
 async def start_again(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    for k in ("nq", "setkey", "edit", "ai_import_ready", "ai_import_flagged"):
+    for k in ("nq", "setkey", "edit", "ai_import_ready", "ai_import_flagged", "quiz_preview"):
         context.user_data.pop(k, None)
     return await U.cmd_start(update, context)
 
@@ -67,7 +67,7 @@ def cancel_then(fn):
     """أمر زي /start أو /top جوه محادثة: يلغيها وينفّذ الأمر بدل ما يكتفي بـ"تم الإلغاء"."""
 
     async def handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        for k in ("nq", "setkey", "edit", "ai_import_ready", "ai_import_flagged"):
+        for k in ("nq", "setkey", "edit", "ai_import_ready", "ai_import_flagged", "quiz_preview"):
             context.user_data.pop(k, None)
         await fn(update, context)
         return ConversationHandler.END
@@ -156,12 +156,15 @@ def build_app():
             A.TEAM_NAME: [MessageHandler(TEXT, A.create_team_name)],
             A.IMPORT: [MessageHandler(ONLY_MSG & (filters.Document.ALL | (filters.TEXT & ~filters.COMMAND)), A.import_data)],
             A.AI_INPUT: [MessageHandler(ONLY_MSG & (filters.Document.ALL | (filters.TEXT & ~filters.COMMAND)), A.ai_import_parse)],
-            A.AI_REVIEW: [CallbackQueryHandler(A.ai_import_review, pattern=r"^ai:(confirm|cancel)$")],
+            A.AI_REVIEW: [
+                MessageHandler(ONLY_MSG & filters.PHOTO, A.ai_import_image),
+                CallbackQueryHandler(A.ai_import_review, pattern=r"^ai:(confirm|cancel)$"),
+            ],
             A.BCAST: [MessageHandler(TEXT, A.bcast_send)],
             A.EDIT: [MessageHandler(ONLY_MSG & (filters.PHOTO | (filters.TEXT & ~filters.COMMAND)), A.edit_value)],
         },
         fallbacks=cmd_fallbacks
-        + [CallbackQueryHandler(A.leave_to_admin, pattern=r"^(adm:(menu|list|start|status|lb|teams|export|settings|resume)|q:|t:|sel:|ctl:|tog:|h:)")],
+        + [CallbackQueryHandler(A.leave_to_admin, pattern=r"^(adm:(menu|list|start|status|lb|teams|export|settings|resume)|q:|t:|sel:|pv:|ctl:|tog:|h:)")],
         allow_reentry=True,
     )
     user_conv = ConversationHandler(
@@ -194,7 +197,7 @@ def build_app():
     app.add_handler(CommandHandler("leave", U.cmd_leave))
     app.add_handler(CallbackQueryHandler(on_vote, pattern=r"^v:"))
     app.add_handler(CallbackQueryHandler(U.user_cb, pattern=r"^u:"))
-    app.add_handler(CallbackQueryHandler(A.admin_cb, pattern=r"^(adm|q|t|sel|tog|ctl|h):"))
+    app.add_handler(CallbackQueryHandler(A.admin_cb, pattern=r"^(adm|q|t|sel|pv|tog|ctl|h):"))
     app.add_handler(MessageHandler(ONLY_MSG & filters.ChatType.PRIVATE & ~filters.COMMAND & ~filters.StatusUpdate.ALL, U.relay))
     app.add_error_handler(on_error)
     return app
