@@ -353,6 +353,15 @@ async def end_question(app, cid):
         for t in db.q("SELECT id, name, leader_id FROM teams WHERE EXISTS (SELECT 1 FROM members WHERE team_id=teams.id)"):
             members = team_members(t["id"])
             member_ids = {m["id"] for m in members}
+            lifetime_points = {}
+            if member_ids:
+                totals = db.q(
+                    "SELECT user_id, COALESCE(SUM(CASE WHEN qid<>? THEN points ELSE 0 END),0) total "
+                    "FROM player_results WHERE user_id IN "
+                    "(SELECT user_id FROM members WHERE team_id=?) GROUP BY user_id",
+                    (qid, t["id"]),
+                )
+                lifetime_points = {row["user_id"]: int(row["total"] or 0) for row in totals}
             vs = [v for v in per.get(t["id"], []) if v["user_id"] in member_ids]
             by_user = {v["user_id"]: v for v in vs}
             chosen, _ = majority([(v["choice"], v["ts"]) for v in vs])
@@ -377,15 +386,12 @@ async def end_question(app, cid):
                     (cid, qid, member["id"], t["id"], member["name"], vote["choice"] if vote else None,
                      int(player_ok), player_points, player_bonus),
                 )
-                lifetime = db.q(
-                    "SELECT SUM(points) total FROM player_results WHERE user_id=?", (member["id"],), one=True
-                )
                 individual[member["id"]] = {
                     "choice": vote["choice"] if vote else None,
                     "ok": player_ok,
                     "pts": player_points,
                     "bonus": player_bonus,
-                    "total": int(lifetime["total"] or 0),
+                    "total": lifetime_points.get(member["id"], 0) + player_points,
                 }
             db.x(
                 "INSERT INTO results(contest_id,qid,team_id,team_name,q_text,chosen_text,correct_text,"

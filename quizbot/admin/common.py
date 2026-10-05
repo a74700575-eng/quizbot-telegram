@@ -16,7 +16,7 @@ BACK = rows([btn("🔙 اللوحة", "adm:menu")])
 
 (Q_TEXT, Q_IMAGE, Q_OPTS, Q_CORRECT, Q_EXPL, Q_TIME, Q_POINTS, S_VALUE, IMPORT, BCAST, EDIT) = range(11)
 TEAM_NAME = 200
-AI_INPUT, AI_REVIEW = 300, 301
+AI_INPUT, AI_REVIEW, AI_EDIT = 300, 301, 302
 
 
 def admin_menu():

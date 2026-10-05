@@ -26,7 +26,19 @@ def cb_update(data, uid=1):
 
 
 def context(app):
-    return SimpleNamespace(application=app, bot=SimpleNamespace(username="bot", send_document=AsyncMock(), send_poll=AsyncMock(), send_photo=AsyncMock(), send_message=app.bot.send_message), user_data={}, args=[])
+    return SimpleNamespace(
+        application=app,
+        bot=SimpleNamespace(
+            username="bot",
+            send_document=AsyncMock(),
+            send_poll=AsyncMock(),
+            send_photo=AsyncMock(),
+            send_message=app.bot.send_message,
+            edit_message_reply_markup=AsyncMock(),
+        ),
+        user_data={},
+        args=[],
+    )
 
 
 def markup_of(q):

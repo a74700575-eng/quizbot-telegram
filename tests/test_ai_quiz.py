@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from conftest import run
-from test_handlers import cb_update, context
+from test_handlers import cb_update, context, markup_of
 
 from quizbot import admin as A
 from quizbot import ai_quiz
@@ -253,6 +253,118 @@ def test_ai_import_photo_is_mapped_by_preview_question_number(app):
     assert run(A.ai_import_image(update, ctx)) == A.AI_REVIEW
     assert ctx.user_data["ai_import_ready"][0]["image"] == "largest-photo"
     assert "السؤال 2" in message.reply_text.await_args.args[0]
+
+
+def test_admin_can_repair_flagged_ai_question_before_confirmation(app):
+    ctx = context(app)
+    flagged = {
+        **VALID,
+        "source_number": 2,
+        "correct_index": None,
+        "answer_known": False,
+        "note": "الإجابة غير مؤكدة",
+        "image": "existing-photo-id",
+    }
+    ctx.user_data["ai_import_ready"] = []
+    ctx.user_data["ai_import_flagged"] = [flagged]
+
+    update, query = cb_update("ai:editmenu")
+    assert run(A.ai_import_review(update, ctx)) == A.AI_REVIEW
+    assert any(
+        button.callback_data == "ai:manage:2"
+        for row in markup_of(query).inline_keyboard
+        for button in row
+    )
+
+    update, query = cb_update("ai:manage:2")
+    run(A.ai_import_review(update, ctx))
+    assert any(
+        button.callback_data == "ai:edit:2"
+        for row in markup_of(query).inline_keyboard
+        for button in row
+    )
+
+    update, _query = cb_update("ai:edit:2")
+    assert run(A.ai_import_review(update, ctx)) == A.AI_EDIT
+    assert ctx.user_data["ai_edit_target"] == 2
+
+    invalid_message = SimpleNamespace(text="not JSON", chat_id=1, reply_text=AsyncMock())
+    invalid_update = SimpleNamespace(
+        effective_user=SimpleNamespace(id=1, full_name="Admin"),
+        effective_chat=SimpleNamespace(id=1),
+        effective_message=invalid_message,
+        message=invalid_message,
+    )
+    assert run(A.ai_import_edit_text(invalid_update, ctx)) == A.AI_EDIT
+    assert ctx.user_data["ai_edit_target"] == 2
+    assert ctx.user_data["ai_import_ready"] == []
+
+    message = SimpleNamespace(
+        text=json.dumps(
+            {
+                "question": "ما عاصمة مصر؟",
+                "options": ["القاهرة", "الإسكندرية"],
+                "answer": 1,
+                "explanation": "القاهرة هي العاصمة.",
+            },
+            ensure_ascii=False,
+        ),
+        chat_id=1,
+        reply_text=AsyncMock(),
+    )
+    update = SimpleNamespace(
+        effective_user=SimpleNamespace(id=1, full_name="Admin"),
+        effective_chat=SimpleNamespace(id=1),
+        effective_message=message,
+        message=message,
+    )
+    assert run(A.ai_import_edit_text(update, ctx)) == A.AI_REVIEW
+    assert ctx.user_data["ai_import_ready"][0]["source_number"] == 2
+    assert ctx.user_data["ai_import_ready"][0]["correct_index"] == 0
+    assert ctx.user_data["ai_import_ready"][0]["image"] == "existing-photo-id"
+    assert ctx.user_data["ai_import_flagged"] == []
+    assert "ai_edit_target" not in ctx.user_data
+    assert db.q("SELECT COUNT(*) n FROM questions", one=True)["n"] == 0
+
+
+def test_ai_review_cleanup_disables_old_preview_buttons(app):
+    ctx = context(app)
+    ctx.user_data["ai_preview_chat_id"] = 1
+    ctx.user_data["ai_preview_message_ids"] = [101, 102]
+
+    run(A.clear_ai_review_preview(ctx))
+
+    assert ctx.bot.edit_message_reply_markup.await_count == 2
+    assert ctx.bot.edit_message_reply_markup.await_args_list[0].kwargs == {
+        "chat_id": 1,
+        "message_id": 101,
+        "reply_markup": None,
+    }
+    assert "ai_preview_message_ids" not in ctx.user_data
+
+
+def test_admin_can_exclude_a_question_from_ai_batch_without_importing_it(app):
+    ctx = context(app)
+    ctx.user_data["ai_import_ready"] = [
+        {
+            "source_number": 1,
+            "question": VALID["question"],
+            "options": VALID["options"],
+            "correct_index": 0,
+            "explanation": VALID["explanation"],
+            "image": None,
+        }
+    ]
+    ctx.user_data["ai_import_flagged"] = []
+
+    update, query = cb_update("ai:remove:1")
+    assert run(A.ai_import_review(update, ctx)) == A.AI_REVIEW
+    assert ctx.user_data["ai_import_ready"] == []
+    assert ctx.user_data["ai_import_flagged"][0]["note"] == "استبعده الأدمن من دفعة الاستيراد."
+    callbacks = [button.callback_data for row in markup_of(query).inline_keyboard for button in row]
+    assert "ai:confirm" not in callbacks
+    assert "ai:cancel" in callbacks
+    assert db.q("SELECT COUNT(*) n FROM questions", one=True)["n"] == 0
 
 
 def test_ai_import_command_is_admin_only_and_explains_external_processing(app, monkeypatch):

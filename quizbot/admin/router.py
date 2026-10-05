@@ -18,7 +18,7 @@ from .contest import (
     show_selection,
     show_status,
 )
-from .questions import list_questions, question_cb
+from .questions import clear_ai_review_preview, list_questions, question_cb
 from .settings import show_settings
 from .teams import list_teams, team_cb
 
@@ -92,7 +92,8 @@ async def admin_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def leave_to_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    for k in ("nq", "setkey", "edit", "ai_import_ready", "ai_import_flagged"):
+    await clear_ai_review_preview(context)
+    for k in ("nq", "setkey", "edit", "ai_import_ready", "ai_import_flagged", "ai_edit_target"):
         context.user_data.pop(k, None)
     await admin_cb(update, context)
     return ConversationHandler.END

@@ -51,14 +51,16 @@ async def on_error(update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    for k in ("nq", "setkey", "edit", "ai_import_ready", "ai_import_flagged", "quiz_preview"):
+    await A.clear_ai_review_preview(context)
+    for k in ("nq", "setkey", "edit", "ai_import_ready", "ai_import_flagged", "ai_edit_target", "quiz_preview"):
         context.user_data.pop(k, None)
     await update.effective_message.reply_text("تم الإلغاء ✅")
     return ConversationHandler.END
 
 
 async def start_again(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    for k in ("nq", "setkey", "edit", "ai_import_ready", "ai_import_flagged", "quiz_preview"):
+    await A.clear_ai_review_preview(context)
+    for k in ("nq", "setkey", "edit", "ai_import_ready", "ai_import_flagged", "ai_edit_target", "quiz_preview"):
         context.user_data.pop(k, None)
     return await U.cmd_start(update, context)
 
@@ -67,7 +69,8 @@ def cancel_then(fn):
     """أمر زي /start أو /top جوه محادثة: يلغيها وينفّذ الأمر بدل ما يكتفي بـ"تم الإلغاء"."""
 
     async def handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        for k in ("nq", "setkey", "edit", "ai_import_ready", "ai_import_flagged", "quiz_preview"):
+        await A.clear_ai_review_preview(context)
+        for k in ("nq", "setkey", "edit", "ai_import_ready", "ai_import_flagged", "ai_edit_target", "quiz_preview"):
             context.user_data.pop(k, None)
         await fn(update, context)
         return ConversationHandler.END
@@ -158,8 +161,10 @@ def build_app():
             A.AI_INPUT: [MessageHandler(ONLY_MSG & (filters.Document.ALL | (filters.TEXT & ~filters.COMMAND)), A.ai_import_parse)],
             A.AI_REVIEW: [
                 MessageHandler(ONLY_MSG & filters.PHOTO, A.ai_import_image),
-                CallbackQueryHandler(A.ai_import_review, pattern=r"^ai:(confirm|cancel)$"),
+                MessageHandler(TEXT, A.ai_import_edit_text),
+                CallbackQueryHandler(A.ai_import_review, pattern=r"^ai:"),
             ],
+            A.AI_EDIT: [MessageHandler(TEXT, A.ai_import_edit_text)],
             A.BCAST: [MessageHandler(TEXT, A.bcast_send)],
             A.EDIT: [MessageHandler(ONLY_MSG & (filters.PHOTO | (filters.TEXT & ~filters.COMMAND)), A.edit_value)],
         },

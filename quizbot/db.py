@@ -31,6 +31,7 @@ CREATE TABLE IF NOT EXISTS player_results(
     contest_id INTEGER, qid INTEGER, user_id INTEGER, team_id INTEGER, player_name TEXT,
     choice INTEGER, is_correct INTEGER, points INTEGER DEFAULT 0, bonus INTEGER DEFAULT 0,
     PRIMARY KEY(contest_id, qid, user_id));
+CREATE INDEX IF NOT EXISTS idx_player_results_user ON player_results(user_id);
 CREATE TABLE IF NOT EXISTS settings(k TEXT PRIMARY KEY, v TEXT);
 CREATE TABLE IF NOT EXISTS join_attempts(user_id INTEGER NOT NULL, attempted_at REAL NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_join_attempts_user_time ON join_attempts(user_id, attempted_at);
@@ -63,6 +64,7 @@ CREATE TABLE IF NOT EXISTS player_results(
     contest_id BIGINT, qid BIGINT, user_id BIGINT, team_id BIGINT, player_name TEXT,
     choice INTEGER, is_correct INTEGER, points INTEGER DEFAULT 0, bonus INTEGER DEFAULT 0,
     PRIMARY KEY(contest_id, qid, user_id));
+CREATE INDEX IF NOT EXISTS idx_player_results_user ON player_results(user_id);
 CREATE TABLE IF NOT EXISTS settings(k TEXT PRIMARY KEY, v TEXT);
 CREATE TABLE IF NOT EXISTS join_attempts(user_id BIGINT NOT NULL, attempted_at DOUBLE PRECISION NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_join_attempts_user_time ON join_attempts(user_id, attempted_at);

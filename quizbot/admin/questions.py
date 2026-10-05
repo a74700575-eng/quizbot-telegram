@@ -17,9 +17,13 @@ from ..questions import (
     import_questions,
     insert_question,
 )
+from ..questions import (
+    validate as validate_question,
+)
 from ..state import RT
 from ..ui import BLUE, GREEN, RED, admin_only, btn, esc, rows, safe_send, show
 from .common import (
+    AI_EDIT,
     AI_INPUT,
     AI_REVIEW,
     EDIT,
@@ -278,7 +282,9 @@ async def ai_import_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "لا ترسل مفتاح API في المحادثة."
         )
         return ConversationHandler.END
-    context.user_data.pop("ai_import_ready", None)
+    await clear_ai_review_preview(context)
+    for key in ("ai_import_ready", "ai_import_flagged", "ai_edit_target"):
+        context.user_data.pop(key, None)
     await update.effective_message.reply_text(
         "✨ <b>تنسيق أسئلة بالذكاء الاصطناعي</b>\n\n"
         f"الصق الأسئلة مع الاختيارات والإجابات الصحيحة، أو أرسل ملف <b>.txt</b> (حتى {MAX_AI_QUESTIONS} سؤالًا و20,000 حرف).\n"
@@ -311,6 +317,8 @@ def _ai_preview_chunks(ready, flagged):
         blocks.append("\n".join(lines))
 
     header = f"📋 <b>المعاينة:</b> {len(ready)} سؤال جاهز، {len(flagged)} يحتاج مراجعة.\n"
+    if ready or flagged:
+        header += "🛠 راجع كل سؤال؛ يمكنك تصحيحه أو استبعاده قبل التأكيد.\n"
     if ready:
         header += "🖼 لإرفاق صورة: أرسلها كصورة مع رقم السؤال الظاهر في المعاينة في التعليق (مثال: 2).\n"
     header += "\n"
@@ -324,6 +332,56 @@ def _ai_preview_chunks(ready, flagged):
     if current:
         chunks.append(current)
     return chunks or [header]
+
+
+def _ai_review_markup(ready, flagged):
+    keyboard = []
+    if ready or flagged:
+        keyboard.append([btn("🛠 تعديل أو استبعاد سؤال", "ai:editmenu", BLUE)])
+    if ready:
+        keyboard.append([btn(f"✅ أضف {len(ready)} سؤال", "ai:confirm", GREEN)])
+    keyboard.append([btn("❌ إلغاء", "ai:cancel", RED)])
+    return rows(*keyboard)
+
+
+async def clear_ai_review_preview(context: ContextTypes.DEFAULT_TYPE):
+    """Disable old review buttons so a stale preview cannot confirm an outdated batch."""
+    chat_id = context.user_data.pop("ai_preview_chat_id", None)
+    message_ids = context.user_data.pop("ai_preview_message_ids", [])
+    if chat_id is None:
+        return
+    for message_id in message_ids:
+        try:
+            await context.bot.edit_message_reply_markup(
+                chat_id=chat_id, message_id=message_id, reply_markup=None
+            )
+        except TelegramError:
+            pass
+
+
+async def _render_ai_review(update, context, ready, flagged):
+    await clear_ai_review_preview(context)
+    chunks = _ai_preview_chunks(ready, flagged)
+    chat = getattr(update, "effective_chat", None)
+    message = getattr(update, "effective_message", None) or getattr(update, "message", None)
+    query = getattr(update, "callback_query", None)
+    chat_id = chat.id if chat else message.chat_id
+    message_ids = []
+    for index, chunk in enumerate(chunks):
+        markup = _ai_review_markup(ready, flagged) if index == len(chunks) - 1 else None
+        if index == 0 and query:
+            sent = await query.edit_message_text(chunk, reply_markup=markup)
+            message_id = getattr(sent, "message_id", None) or getattr(query.message, "message_id", None)
+        elif index == 0:
+            sent = await message.reply_text(chunk, reply_markup=markup)
+            message_id = getattr(sent, "message_id", None)
+        else:
+            sent = await context.bot.send_message(chat_id, chunk, reply_markup=markup)
+            message_id = getattr(sent, "message_id", None)
+        if isinstance(message_id, int):
+            message_ids.append(message_id)
+    context.user_data["ai_preview_chat_id"] = chat_id
+    context.user_data["ai_preview_message_ids"] = message_ids
 
 
 @admin_only
@@ -362,17 +420,7 @@ async def ai_import_parse(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     context.user_data["ai_import_ready"] = ready
     context.user_data["ai_import_flagged"] = flagged
-    keyboard = []
-    if ready:
-        keyboard.append([btn(f"✅ أضف {len(ready)} سؤال", "ai:confirm", GREEN)])
-    keyboard.append([btn("❌ إلغاء", "ai:cancel", RED)])
-    chunks = _ai_preview_chunks(ready, flagged)
-    for i, chunk in enumerate(chunks):
-        markup = rows(*keyboard) if i == len(chunks) - 1 else None
-        if i == 0:
-            await msg.reply_text(chunk, reply_markup=markup)
-        else:
-            await context.bot.send_message(msg.chat_id, chunk, reply_markup=markup)
+    await _render_ai_review(update, context, ready, flagged)
     return AI_REVIEW
 
 
@@ -405,14 +453,122 @@ async def ai_import_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
 @admin_only
 async def ai_import_review(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    action = query.data.split(":", 1)[1]
+    parts = query.data.split(":")
+    action = parts[1]
     ready = context.user_data.get("ai_import_ready")
+    flagged = context.user_data.get("ai_import_flagged", [])
+
+    if action == "editmenu":
+        items = sorted((ready or []) + flagged, key=lambda item: item["source_number"])
+        if not items:
+            await query.answer("لا توجد أسئلة مفتوحة للمراجعة.", show_alert=True)
+            return AI_REVIEW
+        ready_numbers = {item["source_number"] for item in (ready or [])}
+        keyboard = [
+            [
+                btn(
+                    f"{'✅' if item['source_number'] in ready_numbers else '⚠️'} {item['source_number']}. {item['question'][:30]}",
+                    f"ai:manage:{item['source_number']}",
+                    BLUE,
+                )
+            ]
+            for item in items
+        ]
+        keyboard.append([btn("🔙 الرجوع للمعاينة", "ai:back", BLUE)])
+        await query.answer()
+        await query.edit_message_text(
+            "اختر سؤالًا للتعديل أو الاستبعاد. الأسئلة ⚠️ غير صالحة للإضافة حتى تصحيحها يدويًا.",
+            reply_markup=rows(*keyboard),
+        )
+        return AI_REVIEW
+
+    if action == "manage":
+        try:
+            source_number = int(parts[2])
+        except (IndexError, ValueError):
+            await query.answer("اختيار غير صالح.", show_alert=True)
+            return AI_REVIEW
+        item = next(
+            (question for question in (ready or []) + flagged if question["source_number"] == source_number),
+            None,
+        )
+        if not item:
+            await query.answer("هذا السؤال لم يعد موجودًا في المعاينة.", show_alert=True)
+            return AI_REVIEW
+        await query.answer()
+        await query.edit_message_text(
+            f"<b>السؤال {source_number}</b>\n{esc(item['question'] or '(نص السؤال ناقص)')}\n\nاختر الإجراء:",
+            reply_markup=rows(
+                [btn("✏️ تصحيح السؤال", f"ai:edit:{source_number}", GREEN)],
+                [btn("🚫 استبعاده من الإضافة", f"ai:remove:{source_number}", RED)],
+                [btn("🔙 قائمة الأسئلة", "ai:editmenu", BLUE)],
+            ),
+        )
+        return AI_REVIEW
+
+    if action == "edit":
+        try:
+            source_number = int(parts[2])
+        except (IndexError, ValueError):
+            await query.answer("اختيار غير صالح.", show_alert=True)
+            return AI_REVIEW
+        item = next(
+            (question for question in (ready or []) + flagged if question["source_number"] == source_number),
+            None,
+        )
+        if not item:
+            await query.answer("هذا السؤال لم يعد موجودًا في المعاينة.", show_alert=True)
+            return AI_REVIEW
+        await query.answer()
+        await clear_ai_review_preview(context)
+        context.user_data["ai_edit_target"] = source_number
+        await query.edit_message_text(
+            f"أرسل تصحيح السؤال {source_number} ككائن JSON، مع answer كرقم الاختيار الصحيح ابتداءً من 1.\n"
+            '<pre>{"question":"نص السؤال","options":["اختيار 1","اختيار 2"],"answer":1,"explanation":"الشرح"}</pre>\n'
+            "سيتم التحقق من النص والاختيارات والإجابة قبل تحديث المعاينة. الصورة المرفقة حاليًا ستظل محفوظة.\n/cancel للإلغاء"
+        )
+        return AI_EDIT
+
+    if action == "remove":
+        try:
+            source_number = int(parts[2])
+        except (IndexError, ValueError):
+            await query.answer("اختيار غير صالح.", show_alert=True)
+            return AI_REVIEW
+        item = next(
+            (question for question in (ready or []) + flagged if question["source_number"] == source_number),
+            None,
+        )
+        if not item:
+            await query.answer("هذا السؤال لم يعد موجودًا في المعاينة.", show_alert=True)
+            return AI_REVIEW
+        await query.answer()
+        if item in (ready or []):
+            ready.remove(item)
+            flagged.append(item)
+        item["note"] = "استبعده الأدمن من دفعة الاستيراد."
+        context.user_data["ai_import_ready"] = ready or []
+        context.user_data["ai_import_flagged"] = flagged
+        await _render_ai_review(update, context, ready or [], flagged)
+        return AI_REVIEW
+
+    if action == "back":
+        await query.answer()
+        await _render_ai_review(update, context, ready or [], flagged)
+        return AI_REVIEW
+
     if action == "confirm" and not ready:
         await query.answer("انتهت المعاينة أو لا توجد أسئلة صالحة للإضافة.", show_alert=True)
-        return ConversationHandler.END
+        return AI_REVIEW
+
+    if action not in ("confirm", "cancel"):
+        await query.answer("هذا الإجراء غير متاح.", show_alert=True)
+        return AI_REVIEW
+
     await query.answer()
-    context.user_data.pop("ai_import_ready", None)
-    context.user_data.pop("ai_import_flagged", None)
+    await clear_ai_review_preview(context)
+    for key in ("ai_import_ready", "ai_import_flagged", "ai_edit_target"):
+        context.user_data.pop(key, None)
     if action == "cancel":
         await query.edit_message_text("تم إلغاء استيراد أسئلة الذكاء الاصطناعي.")
         return ConversationHandler.END
@@ -436,6 +592,52 @@ async def ai_import_review(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lines.append("الأسئلة التي ظهرت بعلامة المراجعة لم تتم إضافتها.")
     await query.edit_message_text("\n".join(lines), reply_markup=rows([btn("📋 الأسئلة", "adm:list:0", BLUE)]))
     return ConversationHandler.END
+
+
+@admin_only
+async def ai_import_edit_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    message = update.effective_message
+    source_number = context.user_data.get("ai_edit_target")
+    if source_number is None:
+        await message.reply_text("لا يوجد سؤال قيد التعديل. استخدم زر «تعديل أو استبعاد سؤال» من المعاينة.")
+        return AI_REVIEW
+    try:
+        payload = json.loads(message.text or "")
+        clean = validate_question(payload)
+    except (json.JSONDecodeError, TypeError, ValueError) as exc:
+        await message.reply_text(
+            f"⚠️ لم أستطع اعتماد التصحيح: {esc(str(exc))}\nأرسل JSON صحيحًا؛ answer رقم يبدأ من 1، ومن الاختيارين إلى 10 اختيارات."
+        )
+        return AI_EDIT
+
+    ready = context.user_data.get("ai_import_ready", [])
+    flagged = context.user_data.get("ai_import_flagged", [])
+    item = next(
+        (question for question in ready + flagged if question["source_number"] == source_number),
+        None,
+    )
+    if not item:
+        context.user_data.pop("ai_edit_target", None)
+        await message.reply_text("انتهت المعاينة لهذا السؤال. أعد تشغيل /aiimport إذا لزم الأمر.")
+        return ConversationHandler.END
+
+    item.update(
+        question=clean["text"],
+        options=clean["opts"],
+        correct_index=clean["correct"],
+        explanation=clean["expl"],
+        note="",
+    )
+    if item in flagged:
+        flagged.remove(item)
+        ready.append(item)
+        ready.sort(key=lambda question: question["source_number"])
+    context.user_data["ai_import_ready"] = ready
+    context.user_data["ai_import_flagged"] = flagged
+    context.user_data.pop("ai_edit_target", None)
+    await message.reply_text(f"✅ تم تحديث السؤال {source_number}؛ راجع النسخة المحدّثة قبل التأكيد.")
+    await _render_ai_review(update, context, ready, flagged)
+    return AI_REVIEW
 
 
 EDIT_FIELDS = {
